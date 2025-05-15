@@ -308,6 +308,7 @@ WINUHID_API PWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeou
 	event = (PWINUHID_EVENT)HeapAlloc(GetProcessHeap(), 0, bufferSize);
 	if (event == NULL) {
 		ReleaseSRWLockShared(&Device->Lock);
+		CloseHandle(overlapped.hEvent);
 		SetLastError(ERROR_OUTOFMEMORY);
 		return NULL;
 	}
@@ -363,6 +364,9 @@ WINUHID_API PWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeou
 			AcquireSRWLockExclusive(&Device->Lock);
 			if (Device->EventBufferSizeHint < bufferSize) {
 				Device->EventBufferSizeHint = bufferSize;
+			}
+			else {
+				bufferSize = Device->EventBufferSizeHint;
 			}
 			ReleaseSRWLockExclusive(&Device->Lock);
 
