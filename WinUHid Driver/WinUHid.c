@@ -749,7 +749,7 @@ WinUHidEvtIoDeviceControl(
         RtlCopyMemory(
             opContext->HidTransferPacket.reportBuffer,
             &readComplete->Data[0],
-            readComplete->DataLength);
+            min(readComplete->DataLength, opContext->HidTransferPacket.reportBufferLen));
 
         //
         // If the report is not fully populated, pad the remaining part with zeros
