@@ -7,9 +7,9 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WinUHid Driver", "WinUHid D
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WinUHid", "WinUHid\WinUHid.vcxproj", "{91CB38A2-BD18-4B0B-A8FB-6E0172F525F8}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RootDevCA", "RootDevCA\RootDevCA.vcxproj", "{591F4980-10E8-4E68-AC6F-1189C7F84670}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RootDevCA", "Installer\RootDevCA\RootDevCA.vcxproj", "{591F4980-10E8-4E68-AC6F-1189C7F84670}"
 EndProject
-Project("{B7DD6F7E-DEF8-4E67-B5B7-07EF123DB6F0}") = "WinUHid Package", "WinUHid Package\WinUHid Package.wixproj", "{ADF0805E-71C0-4DC8-948B-D39FE8011665}"
+Project("{B7DD6F7E-DEF8-4E67-B5B7-07EF123DB6F0}") = "WinUHid Package", "Installer\WinUHid Package\WinUHid Package.wixproj", "{ADF0805E-71C0-4DC8-948B-D39FE8011665}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

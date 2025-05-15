@@ -4,7 +4,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\RootDevCA\RootDevCA.vcxproj" />
-		<ProjectReference Include="..\WinUHid Driver\WinUHid Driver.vcxproj" />
+		<ProjectReference Include="..\..\WinUHid Driver\WinUHid Driver.vcxproj" />
 	</ItemGroup>
 	<ItemGroup>
 		<PackageReference Include="WixToolset.IIS.wixext" Version="6.0.0" />
