@@ -1,0 +1,7 @@
+LIBRARY "RootDevCA"
+
+EXPORTS
+    CreateRootDevice
+    DeleteRootDevice
+    InstallDriver
+    UninstallDriver

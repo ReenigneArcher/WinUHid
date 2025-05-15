@@ -1,0 +1,85 @@
+﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+	 xmlns:iis="http://wixtoolset.org/schemas/v4/wxs/iis">
+	<Package Id="WinUHid.WinUHid" Name="WinUHid" Manufacturer="WinUHid Project" Version="1.0.0.0">
+		<MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize" />
+		<MediaTemplate EmbedCab="yes" />
+
+		<StandardDirectory Id="ProgramFiles6432Folder">
+			<!-- RootDevCA.dll depends on this install path -->
+			<Directory Id="INSTALLFOLDER" Name="WinUHid" />
+		</StandardDirectory>
+
+		<!-- Custom actions to install and remove the driver and virtual device -->
+		<Binary Id="RootDevCA" SourceFile="$(RootDevCA.TargetPath)" />
+		<CustomAction Id="CreateRootDevice" BinaryRef="RootDevCA" DllEntry="CreateRootDevice"
+					  Execute="deferred" Return="check" Impersonate="no"/>
+		<CustomAction Id="CreateRootDeviceRollback" BinaryRef="RootDevCA" DllEntry="DeleteRootDevice"
+					  Execute="rollback" Return="ignore" Impersonate="no"/>
+		<CustomAction Id="DeleteRootDevice" BinaryRef="RootDevCA" DllEntry="DeleteRootDevice"
+					  Execute="deferred" Return="check" Impersonate="no"/>
+		<CustomAction Id="DeleteRootDeviceRollback" BinaryRef="RootDevCA" DllEntry="CreateRootDevice"
+				      Execute="rollback" Return="ignore" Impersonate="no"/>
+		<CustomAction Id="InstallDriver" BinaryRef="RootDevCA" DllEntry="InstallDriver"
+					  Execute="deferred" Return="check" Impersonate="no"/>
+		<CustomAction Id="InstallDriverRollback" BinaryRef="RootDevCA" DllEntry="UninstallDriver"
+					  Execute="rollback" Return="ignore" Impersonate="no"/>
+		<CustomAction Id="UninstallDriver" BinaryRef="RootDevCA" DllEntry="UninstallDriver"
+					  Execute="deferred" Return="check" Impersonate="no"/>
+		<CustomAction Id="UninstallDriverRollback" BinaryRef="RootDevCA" DllEntry="InstallDriver"
+					  Execute="rollback" Return="ignore" Impersonate="no"/>
+
+		<InstallExecuteSequence>
+			<!-- Create the root device on install/upgrade/repair (no-op if already present),
+			     but only remove it on rollback for initial installations.
+
+				 NB: We schedule this before RegisterProduct to ensure the IIS extension's
+				     CA has run to trust our cert before we start the installation flow. -->
+			<Custom Action="CreateRootDeviceRollback"
+		            Before="CreateRootDevice"
+		            Condition="NOT Installed" />
+			<Custom Action="CreateRootDevice"
+					Before="RegisterProduct"
+					Condition="NOT REMOVE" />
+
+			<!-- Install the new driver on install/upgrade/repair -->
+			<Custom Action="InstallDriverRollback"
+		            Before="InstallDriver"
+		            Condition="NOT REMOVE" />
+			<Custom Action="InstallDriver"
+					After="CreateRootDevice"
+					Condition="NOT REMOVE" />
+
+			<!-- Delete the root device on complete removal only -->
+			<Custom Action="DeleteRootDeviceRollback"
+					Before="DeleteRootDevice"
+					Condition="Installed AND REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+			<Custom Action="DeleteRootDevice"
+					Before="UninstallDriverRollback"
+					Condition="Installed AND REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+
+			<!-- Uninstall the (now unused) driver -->
+			<Custom Action="UninstallDriverRollback"
+					Before="UninstallDriver"
+					Condition="REMOVE" />
+			<Custom Action="UninstallDriver"
+					Before="RemoveFiles"
+					Condition="REMOVE" />
+		</InstallExecuteSequence>
+
+		<Binary Id="WinUHidCert" SourceFile="WinUHidCertificate.cer" />
+
+		<ComponentGroup Id="WinUHid" Directory="INSTALLFOLDER">
+			<!-- Install the driver package -->
+			<Files Include="$(WinUHid_Driver.TargetDir)\WinUHid Driver\**" />
+
+			<!-- Place our signing certificate in the TrustedPublishers store to avoid triggering a user prompt in quiet mode -->
+			<Component Id="WinUHidCertificate" Guid="{09B24DE9-515E-45B1-B350-CD6E20022457}">
+				<iis:Certificate BinaryRef="WinUHidCert" Name="Cameron Gutman" StoreLocation="localMachine" StoreName="trustedPublisher" />
+			</Component>
+		</ComponentGroup>
+
+		<Feature Id="Main">
+			<ComponentGroupRef Id="WinUHid" />
+		</Feature>
+  </Package>
+</Wix>
