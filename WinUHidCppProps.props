@@ -21,4 +21,9 @@
       <ImageHasSafeExceptionHandlers Condition="'$(Platform)'=='Win32'">true</ImageHasSafeExceptionHandlers>
     </Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(PlatformToolset)'!='WindowsUserModeDriver10.0'">
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Release'">Multithreaded</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
 </Project>
