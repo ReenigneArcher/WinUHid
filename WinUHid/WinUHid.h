@@ -6,7 +6,9 @@
 #define WINUHID_EXTERN_C
 #endif
 
-#ifdef WINUHID_EXPORTS
+#if defined(WINUHID_STATIC)
+#define WINUHID_API WINUHID_EXTERN_C
+#elif defined(WINUHID_EXPORTS)
 #define WINUHID_API WINUHID_EXTERN_C __declspec(dllexport)
 #else
 #define WINUHID_API WINUHID_EXTERN_C __declspec(dllimport)
