@@ -38,3 +38,11 @@ jobs:
 
     - name: Build solution
       run: msbuild WinUHid.sln /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /m /verbosity:minimal
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: WinUHid-${{ matrix.configuration }}-${{ matrix.platform }}
+        path: |
+          build/${{ matrix.configuration }}/${{ matrix.platform }}/WinUHid.*
+          WinUHid/WinUHid.h
