@@ -1,6 +1,9 @@
 #include "pch.h"
 #include "WinUHid.h"
 
+#include <wrl/wrappers/corewrappers.h>
+using namespace Microsoft::WRL;
+
 //
 // IOCTL interfaces for WinUHid
 //
@@ -59,23 +62,23 @@ BOOL DeviceIoControlInSync(HANDLE Handle, DWORD Ioctl, LPVOID InBuffer, DWORD In
 	DWORD bytesRead;
 	BOOL ret;
 
-	overlapped.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-	if (overlapped.hEvent == NULL) {
+	Wrappers::Event overlappedEvent{ CreateEventW(NULL, FALSE, FALSE, NULL) };
+	if (!overlappedEvent.IsValid()) {
 		return FALSE;
 	}
+
+	overlapped.hEvent = overlappedEvent.Get();
 
 	ret = DeviceIoControl(Handle, Ioctl, InBuffer, InBufferSize, NULL, 0, &bytesRead, &overlapped);
 	if (!ret && GetLastError() == ERROR_IO_PENDING) {
 		ret = GetOverlappedResult(Handle, &overlapped, &bytesRead, TRUE);
 	}
 
-	CloseHandle(overlapped.hEvent);
 	return ret;
 }
 
 WINUHID_API DWORD WinUHidGetDriverInterfaceVersion()
 {
-	HANDLE deviceHandle;
 	DWORD version;
 	DWORD bytesReturned;
 
@@ -84,22 +87,21 @@ WINUHID_API DWORD WinUHidGetDriverInterfaceVersion()
 	// but we request GENERIC_READ|GENERIC_WRITE to ensure this is
 	// a good indicator of whether the driver can actually be used.
 	//
-	deviceHandle = CreateFileW(WINUHID_WIN32_PATH,
+	Wrappers::FileHandle handle{ CreateFileW(WINUHID_WIN32_PATH,
 		GENERIC_READ | GENERIC_WRITE,
 		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		NULL,
 		OPEN_EXISTING,
 		0,
-		NULL);
-	if (deviceHandle == INVALID_HANDLE_VALUE) {
+		NULL) };
+	if (!handle.IsValid()) {
 		return 0;
 	}
 
-	if (!DeviceIoControl(deviceHandle, IOCTL_WINUHID_GET_INTERFACE_VERSION, NULL, 0, &version, sizeof(version), &bytesReturned, NULL)) {
+	if (!DeviceIoControl(handle.Get(), IOCTL_WINUHID_GET_INTERFACE_VERSION, NULL, 0, &version, sizeof(version), &bytesReturned, NULL)) {
 		version = 0;
 	}
 
-	CloseHandle(deviceHandle);
 	return version;
 }
 
@@ -197,17 +199,18 @@ WINUHID_API BOOL WinUHidSubmitInputReport(PWINUHID_DEVICE Device, LPBYTE Report,
 		return FALSE;
 	}
 
-	overlapped.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-	if (overlapped.hEvent == NULL) {
+	Wrappers::Event overlappedEvent{ CreateEventW(NULL, FALSE, FALSE, NULL) };
+	if (!overlappedEvent.IsValid()) {
 		return FALSE;
 	}
+
+	overlapped.hEvent = overlappedEvent.Get();
 
 	ret = WriteFile(Device->Handle, Report, ReportSize, &bytesWritten, &overlapped);
 	if (!ret && GetLastError() == ERROR_IO_PENDING) {
 		ret = GetOverlappedResult(Device->Handle, &overlapped, &bytesWritten, TRUE);
 	}
 
-	CloseHandle(overlapped.hEvent);
 	return ret;
 }
 
@@ -295,10 +298,12 @@ WINUHID_API PWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeou
 		return NULL;
 	}
 
-	overlapped.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-	if (overlapped.hEvent == NULL) {
+	Wrappers::Event overlappedEvent{ CreateEventW(NULL, FALSE, FALSE, NULL) };
+	if (!overlappedEvent.IsValid()) {
 		return NULL;
 	}
+
+	overlapped.hEvent = overlappedEvent.Get();
 
 	//
 	// Acquire the device lock in shared mode to protect the state and event buffer size hints
@@ -308,7 +313,6 @@ WINUHID_API PWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeou
 	event = (PWINUHID_EVENT)HeapAlloc(GetProcessHeap(), 0, bufferSize);
 	if (event == NULL) {
 		ReleaseSRWLockShared(&Device->Lock);
-		CloseHandle(overlapped.hEvent);
 		SetLastError(ERROR_OUTOFMEMORY);
 		return NULL;
 	}
@@ -428,7 +432,6 @@ WINUHID_API PWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeou
 
 Fail:
 	HeapFree(GetProcessHeap(), 0, event);
-	CloseHandle(overlapped.hEvent);
 	return NULL;
 }
 
