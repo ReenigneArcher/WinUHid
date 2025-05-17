@@ -22,6 +22,7 @@
     <Link>
       <CETCompat Condition="'$(Platform)'=='Win32' or '$(Platform)'=='x64'">true</CETCompat>
       <ImageHasSafeExceptionHandlers Condition="'$(Platform)'=='Win32'">true</ImageHasSafeExceptionHandlers>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(OutDir)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(PlatformToolset)'!='WindowsUserModeDriver10.0'">

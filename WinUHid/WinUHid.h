@@ -123,7 +123,7 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config);
 // Submits an input report to the device. This can be called before WinUHidStartDevice().
 //
 // Note: The provided report must be exactly the expected length based on the report descriptor
-// and must have one prefix build specifying the Report ID (set to 0 if not using Report IDs).
+// and must have one prefix byte specifying the Report ID (set to 0 if not using Report IDs).
 //
 // On failure, the function will return FALSE. Call GetLastError() to the error code.
 //
