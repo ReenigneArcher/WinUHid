@@ -41,7 +41,7 @@ typedef struct _WINUHID_DEVICE_CONFIG {
 	// Specifies the HID report descriptor
 	//
 	USHORT ReportDescriptorLength;
-	LPBYTE ReportDescriptor;
+	LPCVOID ReportDescriptor;
 
 	//
 	// Optionally distinguishes the physical device collection
