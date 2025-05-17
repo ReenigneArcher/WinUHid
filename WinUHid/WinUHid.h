@@ -60,6 +60,7 @@ typedef struct _WINUHID_DEVICE_CONFIG {
 	//
 	PCWSTR HardwareIDs;
 } WINUHID_DEVICE_CONFIG, *PWINUHID_DEVICE_CONFIG;
+typedef CONST WINUHID_DEVICE_CONFIG *PCWINUHID_DEVICE_CONFIG;
 
 typedef ULONG WINUHID_REQUEST_ID;
 
@@ -90,6 +91,7 @@ typedef struct _WINUHID_EVENT {
 		} Read;
 	};
 } WINUHID_EVENT, *PWINUHID_EVENT;
+typedef CONST WINUHID_EVENT *PCWINUHID_EVENT;
 
 #include <poppack.h>
 
@@ -115,7 +117,7 @@ WINUHID_API DWORD WinUHidGetDriverInterfaceVersion(VOID);
 //
 // On failure, the function will return NULL. Call GetLastError() to the error code.
 //
-WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PWINUHID_DEVICE_CONFIG Config);
+WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config);
 
 //
 // Submits an input report to the device. This can be called before WinUHidStartDevice().
@@ -125,7 +127,7 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PWINUHID_DEVICE_CONFIG Config);
 //
 // On failure, the function will return FALSE. Call GetLastError() to the error code.
 //
-WINUHID_API BOOL WinUHidSubmitInputReport(PWINUHID_DEVICE Device, LPBYTE Report, DWORD ReportSize);
+WINUHID_API BOOL WinUHidSubmitInputReport(PWINUHID_DEVICE Device, LPCVOID Report, DWORD ReportSize);
 
 //
 // The WinUHid event callback is invoked each time one of the registered SupportedEvents occurs.
@@ -139,7 +141,7 @@ WINUHID_API BOOL WinUHidSubmitInputReport(PWINUHID_DEVICE Device, LPBYTE Report,
 // Note: It is possible for this callback to be invoked again with a new event even before
 // WinUHidCompleteWriteEvent() or WinUHidCompleteReadEvent() is called for the previous event.
 //
-typedef VOID WINUHID_EVENT_CALLBACK(PVOID CallbackContext, PWINUHID_DEVICE Device, PWINUHID_EVENT Event);
+typedef VOID WINUHID_EVENT_CALLBACK(PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHID_EVENT Event);
 typedef WINUHID_EVENT_CALLBACK* PWINUHID_EVENT_CALLBACK;
 
 //
@@ -164,7 +166,7 @@ WINUHID_API BOOL WinUHidStartDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLB
 //
 // If no event is available before the timeout expires, the function will return NULL.
 //
-WINUHID_API PWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD TimeoutMillis);
+WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD TimeoutMillis);
 
 //
 // Completes a write request and informs the the HID client whether the request was successful.
@@ -176,7 +178,7 @@ WINUHID_API PWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeou
 //
 // This function never fails as long as the provided arguments are valid.
 //
-WINUHID_API VOID WinUHidCompleteWriteEvent(PWINUHID_DEVICE Device, PWINUHID_EVENT Event, BOOL Success);
+WINUHID_API VOID WinUHidCompleteWriteEvent(PWINUHID_DEVICE Device, PCWINUHID_EVENT Event, BOOL Success);
 
 //
 // Completes a read request by providing the data requested by the HID client. If the request
@@ -193,7 +195,7 @@ WINUHID_API VOID WinUHidCompleteWriteEvent(PWINUHID_DEVICE Device, PWINUHID_EVEN
 //
 // This function never fails as long as the provided arguments are valid.
 //
-WINUHID_API VOID WinUHidCompleteReadEvent(PWINUHID_DEVICE Device, PWINUHID_EVENT Event, LPBYTE Data, DWORD DataLength);
+WINUHID_API VOID WinUHidCompleteReadEvent(PWINUHID_DEVICE Device, PCWINUHID_EVENT Event, LPCVOID Data, DWORD DataLength);
 
 //
 // Stops event processing for this device and interrupts any pending poll calls.
