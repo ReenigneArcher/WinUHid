@@ -59,7 +59,6 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>WinUHid.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
@@ -92,6 +91,11 @@
     </ClCompile>
     <ClCompile Include="WinUHidDevs.cpp" />
     <ClCompile Include="WinUHidMouse.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinUHid\WinUHid.vcxproj">
+      <Project>{91cb38a2-bd18-4b0b-a8fb-6e0172f525f8}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
