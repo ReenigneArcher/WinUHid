@@ -5,6 +5,16 @@
 typedef struct _WINUHID_XONE_GAMEPAD *PWINUHID_XONE_GAMEPAD;
 
 //
+// Optional callback to be invoked when the state of the force feedback motors change.
+//
+// NOTE: This callback is invoked in the context of rumble thread and delaying it
+// may impact the reliability and timing of force feedback effects. Do not perform
+// any operations that may block in this context.
+//
+typedef VOID WINUHID_XONE_FF_CB(PVOID CallbackContext, UCHAR LeftMotor, UCHAR RightMotor, UCHAR LeftTriggerMotor, UCHAR RightTriggerMotor);
+typedef WINUHID_XONE_FF_CB *PWINUHID_XONE_FF_CB;
+
+//
 // Creates a new Xbox One gamepad. Device info can optionally be provided to override
 // a subset of identification information of the created device.
 //
@@ -12,16 +22,16 @@ typedef struct _WINUHID_XONE_GAMEPAD *PWINUHID_XONE_GAMEPAD;
 //
 // On failure, the function will return NULL. Call GetLastError() to the error code.
 //
-WINUHID_API PWINUHID_XONE_GAMEPAD WinUHidXOneCreate(PCWINUHID_PRESET_DEVICE_INFO Info);
+WINUHID_API PWINUHID_XONE_GAMEPAD WinUHidXOneCreate(PCWINUHID_PRESET_DEVICE_INFO Info, PWINUHID_XONE_FF_CB Callback, PVOID CallbackContext);
 
 #include <pshpack1.h>
 
-typedef struct _XONE_INPUT_REPORT
+typedef struct _WINUHID_XONE_INPUT_REPORT
 {
-	USHORT LeftStickX;
-	USHORT LeftStickY;
-	USHORT RightStickX;
-	USHORT RightStickY;
+	USHORT LeftStickX; // 0x8000 is centered
+	USHORT LeftStickY; // 0x8000 is centered
+	USHORT RightStickX; // 0x8000 is centered
+	USHORT RightStickY; // 0x8000 is centered
 	USHORT LeftTrigger : 10;
 	USHORT RightTrigger : 10;
 	UCHAR ButtonA : 1;
@@ -40,8 +50,8 @@ typedef struct _XONE_INPUT_REPORT
 	UCHAR ButtonHome : 1;
 	UCHAR Reserved5: 7;
 	UCHAR BatteryLevel; // 0 - 0xFF
-} XONE_INPUT_REPORT, *PXONE_INPUT_REPORT;
-typedef CONST XONE_INPUT_REPORT* PCXONE_INPUT_REPORT;
+} WINUHID_XONE_INPUT_REPORT, *PWINUHID_XONE_INPUT_REPORT;
+typedef CONST WINUHID_XONE_INPUT_REPORT *PCWINUHID_XONE_INPUT_REPORT;
 
 #include <poppack.h>
 
@@ -50,7 +60,7 @@ typedef CONST XONE_INPUT_REPORT* PCXONE_INPUT_REPORT;
 //
 // On failure, the function will return FALSE. Call GetLastError() to the error code.
 //
-WINUHID_API BOOL WinUHidXOneReportInput(PWINUHID_XONE_GAMEPAD Gamepad, PCXONE_INPUT_REPORT Report);
+WINUHID_API BOOL WinUHidXOneReportInput(PWINUHID_XONE_GAMEPAD Gamepad, PCWINUHID_XONE_INPUT_REPORT Report);
 
 //
 // Destroys the Xbox One gamepad.

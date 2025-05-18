@@ -1,6 +1,9 @@
 #include "pch.h"
 #include "WinUHidXOne.h"
 
+#include <wrl/wrappers/corewrappers.h>
+using namespace Microsoft::WRL;
+
 //
 // This device emulates a Microsoft Xbox One gamepad
 //
@@ -149,17 +152,151 @@ const WINUHID_DEVICE_CONFIG k_XOneConfig =
 	L"HID\\VID_045E&PID_02FF&IG_00\0",
 };
 
+typedef struct _XONE_OUTPUT_REPORT
+{
+	union {
+		struct {
+			UCHAR MotorsEnabled;
+			UCHAR LeftTriggerMotor;
+			UCHAR RightTriggerMotor;
+			UCHAR LeftMotor;
+			UCHAR RightMotor;
+			UCHAR Duration; // 10ms units
+			UCHAR Delay; // 10ms units
+			UCHAR Repeat;
+		};
+		LONG64 Data;
+	} u;
+} XONE_OUTPUT_REPORT, *PXONE_OUTPUT_REPORT;
+#define XONE_TIME_TO_FILETIME(x) ((x) * -100000)
+
 typedef struct _WINUHID_XONE_GAMEPAD {
 	PWINUHID_DEVICE Device;
+
+	HANDLE RumbleThread;
+	HANDLE RumbleUpdatedEvent;
+	BOOL Stopping;
+	XONE_OUTPUT_REPORT RumbleState;
+
+	PWINUHID_XONE_FF_CB Callback;
+	PVOID CallbackContext;
 } WINUHID_XONE_GAMEPAD, *PWINUHID_XONE_GAMEPAD;
 
 VOID WinUHidXOneCallback(PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHID_EVENT Event)
 {
 	auto gamepad = (PWINUHID_XONE_GAMEPAD)CallbackContext;
+
+	//
+	// There's only one defined output report
+	//
+	if (Event->ReportId != 0 || Event->Write.DataLength < sizeof(XONE_OUTPUT_REPORT)) {
+		WinUHidCompleteWriteEvent(Device, Event, FALSE);
+		return;
+	}
+
+	//
+	// Pass the report over to the rumble thread if a FF callback is registered
+	//
+	if (gamepad->RumbleThread) {
+		auto report = (PXONE_OUTPUT_REPORT)Event->Write.Data;
+		InterlockedExchange64(&gamepad->RumbleState.u.Data, report->u.Data);
+		SetEvent(gamepad->RumbleUpdatedEvent);
+	}
+
 	WinUHidCompleteWriteEvent(Device, Event, TRUE);
 }
 
-WINUHID_API PWINUHID_XONE_GAMEPAD WinUHidXOneCreate(PCWINUHID_PRESET_DEVICE_INFO Info)
+DWORD WINAPI RumbleThreadProc(LPVOID lpParameter)
+{
+	auto device = (PWINUHID_XONE_GAMEPAD)lpParameter;
+
+	Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> timer{ CreateWaitableTimerW(NULL, TRUE, NULL) };
+	if (!timer.IsValid()) {
+		return GetLastError();
+	}
+
+	while (!device->Stopping) {
+		//
+		// Wait for an output report
+		//
+		DWORD result = WaitForSingleObject(device->RumbleUpdatedEvent, INFINITE);
+		if (device->Stopping) {
+			break;
+		}
+
+		//
+		// Load the most recent FF output report
+		//
+		XONE_OUTPUT_REPORT outputReport;
+		ResetEvent(device->RumbleUpdatedEvent);
+		outputReport.u.Data = InterlockedExchange64(&device->RumbleState.u.Data, 0);
+
+		//
+		// Determine the motor amplitudes to send to the callback
+		//
+		UCHAR leftMotor = (outputReport.u.MotorsEnabled & 0x1) ? outputReport.u.LeftMotor : 0;
+		UCHAR rightMotor = (outputReport.u.MotorsEnabled & 0x2) ? outputReport.u.RightMotor : 0;
+		UCHAR leftTriggerMotor = (outputReport.u.MotorsEnabled & 0x4) ? outputReport.u.LeftTriggerMotor : 0;
+		UCHAR rightTriggerMotor = (outputReport.u.MotorsEnabled & 0x8) ? outputReport.u.RightTriggerMotor : 0;
+
+		for (USHORT i = 0; i <= outputReport.u.Repeat; i++) {
+			HANDLE objects[]{ device->RumbleUpdatedEvent, timer.Get() };
+			LARGE_INTEGER dueTime;
+
+			//
+			// Check to see if we need to do anything
+			//
+			if (outputReport.u.Duration == 0) {
+				device->Callback(device->CallbackContext, 0, 0, 0, 0);
+				break;
+			}
+			else if (leftMotor == 0 && rightMotor == 0 && leftTriggerMotor == 0 && rightTriggerMotor == 0) {
+				device->Callback(device->CallbackContext, 0, 0, 0, 0);
+				break;
+			}
+
+			//
+			// Wait for the delay period before initiating the FF effect
+			//
+			dueTime.QuadPart = XONE_TIME_TO_FILETIME(outputReport.u.Delay);
+			SetWaitableTimer(timer.Get(), &dueTime, 0, NULL, NULL, FALSE);
+			result = WaitForMultipleObjects(ARRAYSIZE(objects), objects, FALSE, INFINITE);
+			if (result == WAIT_OBJECT_0 || device->Stopping) {
+				//
+				// We got a new output report, so break and start over
+				//
+				break;
+			}
+
+			//
+			// Notify the user callback that the motors are now on
+			//
+			device->Callback(device->CallbackContext, leftMotor, rightMotor, leftTriggerMotor, rightTriggerMotor);
+
+			//
+			// Wait for the duration period before stopping the FF effect
+			//
+			dueTime.QuadPart = XONE_TIME_TO_FILETIME(outputReport.u.Duration);
+			SetWaitableTimer(timer.Get(), &dueTime, 0, NULL, NULL, FALSE);
+			result = WaitForMultipleObjects(ARRAYSIZE(objects), objects, FALSE, INFINITE);
+			if (result == WAIT_OBJECT_0 || device->Stopping) {
+				//
+				// We got a new output report, so break and start over
+				//
+				break;
+			}
+
+			//
+			// Notify the user callback that the motors are now off
+			//
+			device->Callback(device->CallbackContext, 0, 0, 0, 0);
+		}
+	}
+
+	return GetLastError();
+}
+
+WINUHID_API PWINUHID_XONE_GAMEPAD WinUHidXOneCreate(PCWINUHID_PRESET_DEVICE_INFO Info, PWINUHID_XONE_FF_CB Callback, PVOID CallbackContext)
 {
 	WINUHID_DEVICE_CONFIG config = k_XOneConfig;
 	PopulateDeviceInfo(&config, Info);
@@ -175,6 +312,26 @@ WINUHID_API PWINUHID_XONE_GAMEPAD WinUHidXOneCreate(PCWINUHID_PRESET_DEVICE_INFO
 		return NULL;
 	}
 
+	gamepad->Callback = Callback;
+	gamepad->CallbackContext = CallbackContext;
+
+	//
+	// If the caller wants FF callbacks, start the rumble thread
+	//
+	if (gamepad->Callback) {
+		gamepad->RumbleUpdatedEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+		if (!gamepad->RumbleUpdatedEvent) {
+			WinUHidXOneDestroy(gamepad);
+			return NULL;
+		}
+
+		gamepad->RumbleThread = CreateThread(NULL, 0, RumbleThreadProc, gamepad, 0, NULL);
+		if (!gamepad->RumbleThread) {
+			WinUHidXOneDestroy(gamepad);
+			return NULL;
+		}
+	}
+
 	gamepad->Device = WinUHidCreateDevice(&config);
 	if (!gamepad->Device) {
 		WinUHidXOneDestroy(gamepad);
@@ -186,10 +343,24 @@ WINUHID_API PWINUHID_XONE_GAMEPAD WinUHidXOneCreate(PCWINUHID_PRESET_DEVICE_INFO
 		return NULL;
 	}
 
+	//
+	// Send an neutral input report
+	//
+	WINUHID_XONE_INPUT_REPORT inputReport;
+	inputReport.LeftStickX = 0x8000;
+	inputReport.LeftStickY = 0x8000;
+	inputReport.RightStickX = 0x8000;
+	inputReport.RightStickY = 0x8000;
+	inputReport.BatteryLevel = 0xFF;
+	if (!WinUHidXOneReportInput(gamepad, &inputReport)) {
+		WinUHidXOneDestroy(gamepad);
+		return NULL;
+	}
+
 	return gamepad;
 }
 
-WINUHID_API BOOL WinUHidXOneReportInput(PWINUHID_XONE_GAMEPAD Gamepad, PCXONE_INPUT_REPORT Report)
+WINUHID_API BOOL WinUHidXOneReportInput(PWINUHID_XONE_GAMEPAD Gamepad, PCWINUHID_XONE_INPUT_REPORT Report)
 {
 	return WinUHidSubmitInputReport(Gamepad->Device, Report, sizeof(*Report));
 }
@@ -198,6 +369,18 @@ WINUHID_API VOID WinUHidXOneDestroy(PWINUHID_XONE_GAMEPAD Gamepad)
 {
 	if (!Gamepad) {
 		return;
+	}
+
+	Gamepad->Stopping = TRUE;
+
+	if (Gamepad->RumbleThread) {
+		SetEvent(Gamepad->RumbleUpdatedEvent);
+		WaitForSingleObject(Gamepad->RumbleThread, INFINITE);
+		CloseHandle(Gamepad->RumbleThread);
+	}
+
+	if (Gamepad->RumbleUpdatedEvent) {
+		CloseHandle(Gamepad->RumbleUpdatedEvent);
 	}
 
 	if (Gamepad->Device) {

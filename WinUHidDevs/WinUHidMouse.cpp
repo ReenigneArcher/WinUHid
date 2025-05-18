@@ -86,7 +86,7 @@ const BYTE k_MouseReportDescriptor[] =
 const WINUHID_DEVICE_CONFIG k_MouseConfig =
 {
 	(WINUHID_EVENT_TYPE)(WINUHID_EVENT_GET_FEATURE | WINUHID_EVENT_SET_FEATURE),
-	0x045e, // Micrsoft
+	0x045e, // Microsoft
 	0x0822, // USB Precision Mouse
 	0,
 	sizeof(k_MouseReportDescriptor),
