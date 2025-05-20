@@ -348,16 +348,25 @@ WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeo
 				// our OVERLAPPED struct on the stack and it will corrupt the stack if the I/O
 				// completes after we've returned from this function.
 				//
+				// NB2: It's important to note here that cancellation is NOT guaranteed. If the IRP
+				// has already been dequeued by the driver or is in the process of being completed,
+				// we could receive a successful status code. If that happens, we must continue
+				// processing the request as if it didn't time out.
+				//
 				CancelIoEx(Device->Handle, &overlapped);
 				WaitForSingleObject(overlapped.hEvent, INFINITE);
-				SetLastError(ERROR_TIMEOUT);
-				goto Fail;
+				ret = GetOverlappedResult(Device->Handle, &overlapped, &bytesWritten, FALSE);
+				if (!ret) {
+					SetLastError(ERROR_TIMEOUT);
+					goto Fail;
+				}
 			}
-
-			//
-			// Get the results of the asynchronous operation
-			//
-			ret = GetOverlappedResult(Device->Handle, &overlapped, &bytesWritten, FALSE);
+			else {
+				//
+				// Get the results of the asynchronous operation
+				//
+				ret = GetOverlappedResult(Device->Handle, &overlapped, &bytesWritten, FALSE);
+			}
 		}
 
 		if (!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
