@@ -210,7 +210,13 @@ DWORD WINAPI RumbleThreadProc(LPVOID lpParameter)
 {
 	auto device = (PWINUHID_XONE_GAMEPAD)lpParameter;
 
-	Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> timer{ CreateWaitableTimerW(NULL, TRUE, NULL) };
+	//
+	// Use a high resolution timer to ensure maximum effect timing accuracy. This timer
+	// will only be set while a FF effect is playing on the device, so it won't impact
+	// system power usage in any meaningful way.
+	//
+	Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> timer{
+		CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_MANUAL_RESET | CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, NULL) };
 	if (!timer.IsValid()) {
 		return GetLastError();
 	}
@@ -258,14 +264,16 @@ DWORD WINAPI RumbleThreadProc(LPVOID lpParameter)
 			//
 			// Wait for the delay period before initiating the FF effect
 			//
-			dueTime.QuadPart = XONE_TIME_TO_FILETIME(outputReport.u.Delay);
-			SetWaitableTimer(timer.Get(), &dueTime, 0, NULL, NULL, FALSE);
-			result = WaitForMultipleObjects(ARRAYSIZE(objects), objects, FALSE, INFINITE);
-			if (result == WAIT_OBJECT_0 || device->Stopping) {
-				//
-				// We got a new output report, so break and start over
-				//
-				break;
+			if (outputReport.u.Delay != 0) {
+				dueTime.QuadPart = XONE_TIME_TO_FILETIME(outputReport.u.Delay);
+				SetWaitableTimer(timer.Get(), &dueTime, 0, NULL, NULL, FALSE);
+				result = WaitForMultipleObjects(ARRAYSIZE(objects), objects, FALSE, INFINITE);
+				if (result == WAIT_OBJECT_0 || device->Stopping) {
+					//
+					// We got a new output report, so break and start over
+					//
+					break;
+				}
 			}
 
 			//
@@ -277,6 +285,15 @@ DWORD WINAPI RumbleThreadProc(LPVOID lpParameter)
 			// Wait for the duration period before stopping the FF effect
 			//
 			dueTime.QuadPart = XONE_TIME_TO_FILETIME(outputReport.u.Duration);
+			if (outputReport.u.Delay == 0 && outputReport.u.Repeat != 0) {
+				//
+				// We specially handle the common case of repeats with no delay specified.
+				// We can optimize the series of short waits and motor on/off cycles by
+				// consolidating all the repeats into the initial wait.
+				//
+				dueTime.QuadPart += dueTime.QuadPart * outputReport.u.Repeat;
+				outputReport.u.Repeat = 0;
+			}
 			SetWaitableTimer(timer.Get(), &dueTime, 0, NULL, NULL, FALSE);
 			result = WaitForMultipleObjects(ARRAYSIZE(objects), objects, FALSE, INFINITE);
 			if (result == WAIT_OBJECT_0 || device->Stopping) {
