@@ -216,7 +216,10 @@ DWORD WINAPI RumbleThreadProc(LPVOID lpParameter)
 	// system power usage in any meaningful way.
 	//
 	Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> timer{
-		CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_MANUAL_RESET | CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, NULL) };
+		CreateWaitableTimerExW(NULL, NULL,
+			CREATE_WAITABLE_TIMER_MANUAL_RESET | CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+			TIMER_ALL_ACCESS)
+	};
 	if (!timer.IsValid()) {
 		return GetLastError();
 	}
