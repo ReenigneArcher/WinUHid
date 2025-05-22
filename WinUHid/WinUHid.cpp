@@ -273,6 +273,17 @@ WINUHID_API BOOL WinUHidStartDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLB
 			ReleaseSRWLockExclusive(&Device->Lock);
 			return FALSE;
 		}
+
+		//
+		// Raise the priority of the event thread to ensure it can quickly service
+		// pending HID requests and then go back to sleep. The scheduling latency
+		// of this thread directly determines the performance of the HID client
+		// reading/writing to this device on the other side.
+		//
+		// Additionally, if this thread is starved too long, VHF may decide that
+		// we're out to lunch and silently cancel our pending requests for us.
+		//
+		SetThreadPriority(Device->EventThread, THREAD_PRIORITY_TIME_CRITICAL);
 	}
 
 	if (!DeviceIoControlInSync(Device->Handle, NULL, IOCTL_WINUHID_START_DEVICE, NULL, 0)) {

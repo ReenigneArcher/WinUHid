@@ -539,6 +539,13 @@ DWORD WINAPI InputThreadProc(LPVOID lpParameter)
 	USHORT timestamp;
 
 	//
+	// Increase thread priority since starvation of this thread
+	// may cause unexpected application behavior due to the
+	// timestamp field wrapping around.
+	//
+	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+
+	//
 	// Get QPC frequency and initial start value
 	//
 	if (!QueryPerformanceFrequency(&frequency)) {
