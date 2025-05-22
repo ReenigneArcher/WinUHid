@@ -56,22 +56,32 @@ size_t MultiSzWcsLen(PCWSTR MultiSzString)
 	return len;
 }
 
-BOOL DeviceIoControlInSync(HANDLE Handle, DWORD Ioctl, LPCVOID InBuffer, DWORD InBufferSize)
+BOOL DeviceIoControlInSync(HANDLE Handle, HANDLE OverlappedEvent, DWORD Ioctl, LPCVOID InBuffer, DWORD InBufferSize)
 {
 	OVERLAPPED overlapped = {};
+	Wrappers::Event privateEvent;
 	DWORD bytesRead;
 	BOOL ret;
 
-	Wrappers::Event overlappedEvent{ CreateEventW(NULL, FALSE, FALSE, NULL) };
-	if (!overlappedEvent.IsValid()) {
-		return FALSE;
+	//
+	// Use the caller's event if provided, otherwise create one for this operation
+	//
+	if (OverlappedEvent) {
+		ResetEvent(OverlappedEvent);
+		overlapped.hEvent = OverlappedEvent;
 	}
+	else {
+		privateEvent.Attach(CreateEventW(NULL, TRUE, FALSE, NULL));
+		if (!privateEvent.IsValid()) {
+			return FALSE;
+		}
 
-	overlapped.hEvent = overlappedEvent.Get();
+		overlapped.hEvent = privateEvent.Get();
+	}
 
 	ret = DeviceIoControl(Handle, Ioctl, const_cast<LPVOID>(InBuffer), InBufferSize, NULL, 0, &bytesRead, &overlapped);
 	if (!ret && GetLastError() == ERROR_IO_PENDING) {
-		ret = GetOverlappedResult(Handle, &overlapped, &bytesRead, TRUE);
+		ret = GetOverlappedResultEx(Handle, &overlapped, &bytesRead, INFINITE, FALSE);
 	}
 
 	return ret;
@@ -115,6 +125,11 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config)
 		return NULL;
 	}
 
+	Wrappers::Event overlappedEvent{ CreateEventW(NULL, TRUE, FALSE, NULL) };
+	if (!overlappedEvent.IsValid()) {
+		return NULL;
+	}
+
 	device = (PWINUHID_DEVICE)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*device));
 	if (!device) {
 		SetLastError(ERROR_OUTOFMEMORY);
@@ -145,14 +160,14 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config)
 	devInfo.ProductID = Config->ProductID;
 	devInfo.VersionNumber = Config->VersionNumber;
 	devInfo.ContainerId = Config->ContainerId;
-	if (!DeviceIoControlInSync(device->Handle, IOCTL_WINUHID_SET_DEVICE_INFO, &devInfo, sizeof(devInfo))) {
+	if (!DeviceIoControlInSync(device->Handle, overlappedEvent.Get(), IOCTL_WINUHID_SET_DEVICE_INFO, &devInfo, sizeof(devInfo))) {
 		goto Fail;
 	}
 
 	//
 	// Set the required report descriptor
 	//
-	if (!DeviceIoControlInSync(device->Handle, IOCTL_WINUHID_SET_REPORT_DESCRIPTOR, Config->ReportDescriptor, Config->ReportDescriptorLength)) {
+	if (!DeviceIoControlInSync(device->Handle, overlappedEvent.Get(), IOCTL_WINUHID_SET_REPORT_DESCRIPTOR, Config->ReportDescriptor, Config->ReportDescriptorLength)) {
 		goto Fail;
 	}
 
@@ -160,7 +175,7 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config)
 	// Set the instance ID if one was provided
 	//
 	if (Config->InstanceID != NULL) {
-		if (!DeviceIoControlInSync(device->Handle, IOCTL_WINUHID_SET_INSTANCE_ID, (LPVOID)Config->InstanceID, (DWORD)(wcslen(Config->InstanceID) + 1) * sizeof(WCHAR))) {
+		if (!DeviceIoControlInSync(device->Handle, overlappedEvent.Get(), IOCTL_WINUHID_SET_INSTANCE_ID, (LPVOID)Config->InstanceID, (DWORD)(wcslen(Config->InstanceID) + 1) * sizeof(WCHAR))) {
 			goto Fail;
 		}
 	}
@@ -169,7 +184,7 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config)
 	// Set additional hardware IDs if provided
 	//
 	if (Config->HardwareIDs != NULL) {
-		if (!DeviceIoControlInSync(device->Handle, IOCTL_WINUHID_SET_HARDWARE_IDS, (LPVOID)Config->HardwareIDs, (DWORD)(MultiSzWcsLen(Config->HardwareIDs) + 1) * sizeof(WCHAR))) {
+		if (!DeviceIoControlInSync(device->Handle, overlappedEvent.Get(), IOCTL_WINUHID_SET_HARDWARE_IDS, (LPVOID)Config->HardwareIDs, (DWORD)(MultiSzWcsLen(Config->HardwareIDs) + 1) * sizeof(WCHAR))) {
 			goto Fail;
 		}
 	}
@@ -177,7 +192,7 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config)
 	//
 	// Finally, create the device
 	//
-	if (!DeviceIoControlInSync(device->Handle, IOCTL_WINUHID_CREATE_DEVICE, NULL, 0)) {
+	if (!DeviceIoControlInSync(device->Handle, overlappedEvent.Get(), IOCTL_WINUHID_CREATE_DEVICE, NULL, 0)) {
 		goto Fail;
 	}
 
@@ -199,7 +214,7 @@ WINUHID_API BOOL WinUHidSubmitInputReport(PWINUHID_DEVICE Device, LPCVOID Report
 		return FALSE;
 	}
 
-	Wrappers::Event overlappedEvent{ CreateEventW(NULL, FALSE, FALSE, NULL) };
+	Wrappers::Event overlappedEvent{ CreateEventW(NULL, TRUE, FALSE, NULL) };
 	if (!overlappedEvent.IsValid()) {
 		return FALSE;
 	}
@@ -208,7 +223,7 @@ WINUHID_API BOOL WinUHidSubmitInputReport(PWINUHID_DEVICE Device, LPCVOID Report
 
 	ret = WriteFile(Device->Handle, Report, ReportSize, &bytesWritten, &overlapped);
 	if (!ret && GetLastError() == ERROR_IO_PENDING) {
-		ret = GetOverlappedResult(Device->Handle, &overlapped, &bytesWritten, TRUE);
+		ret = GetOverlappedResultEx(Device->Handle, &overlapped, &bytesWritten, INFINITE, FALSE);
 	}
 
 	return ret;
@@ -260,7 +275,7 @@ WINUHID_API BOOL WinUHidStartDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLB
 		}
 	}
 
-	if (!DeviceIoControlInSync(Device->Handle, IOCTL_WINUHID_START_DEVICE, NULL, 0)) {
+	if (!DeviceIoControlInSync(Device->Handle, NULL, IOCTL_WINUHID_START_DEVICE, NULL, 0)) {
 		//
 		// Unwinding the event thread creation is relatively simple. We are not yet
 		// in the Started state and we hold the device lock exclusively, so the
@@ -290,7 +305,6 @@ WINUHID_API BOOL WinUHidStartDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLB
 WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD TimeoutMillis)
 {
 	PWINUHID_EVENT event;
-	OVERLAPPED overlapped = {};
 	DWORD bufferSize;
 
 	if (Device == NULL) {
@@ -298,12 +312,10 @@ WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeo
 		return NULL;
 	}
 
-	Wrappers::Event overlappedEvent{ CreateEventW(NULL, FALSE, FALSE, NULL) };
+	Wrappers::Event overlappedEvent{ CreateEventW(NULL, TRUE, FALSE, NULL) };
 	if (!overlappedEvent.IsValid()) {
 		return NULL;
 	}
-
-	overlapped.hEvent = overlappedEvent.Get();
 
 	//
 	// Acquire the device lock in shared mode to protect the state and event buffer size hints
@@ -320,6 +332,7 @@ WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeo
 		BOOL ret;
 		DWORD bytesWritten;
 		PWINUHID_EVENT newEvent;
+		OVERLAPPED overlapped;
 
 		//
 		// If the device has been stopped, abort now
@@ -333,6 +346,9 @@ WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeo
 		//
 		// Issue the asynchronous IOCTL
 		//
+		RtlZeroMemory(&overlapped, sizeof(overlapped));
+		overlapped.hEvent = overlappedEvent.Get();
+		ResetEvent(overlapped.hEvent);
 		ret = DeviceIoControl(Device->Handle, IOCTL_WINUHID_GET_NEXT_EVENT, NULL, 0, event, bufferSize, &bytesWritten, &overlapped);
 		ReleaseSRWLockShared(&Device->Lock);
 
@@ -340,7 +356,8 @@ WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeo
 			//
 			// Wait for the IOCTL to complete or the timeout to expire
 			//
-			if (WaitForSingleObject(overlapped.hEvent, TimeoutMillis) != WAIT_OBJECT_0) {
+			ret = GetOverlappedResultEx(Device->Handle, &overlapped, &bytesWritten, TimeoutMillis, FALSE);
+			if (!ret && GetLastError() == WAIT_TIMEOUT) {
 				//
 				// If the timeout expired, we need to cancel the pending I/O and wait for completion.
 				//
@@ -354,18 +371,11 @@ WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeo
 				// processing the request as if it didn't time out.
 				//
 				CancelIoEx(Device->Handle, &overlapped);
-				WaitForSingleObject(overlapped.hEvent, INFINITE);
-				ret = GetOverlappedResult(Device->Handle, &overlapped, &bytesWritten, FALSE);
+				ret = GetOverlappedResultEx(Device->Handle, &overlapped, &bytesWritten, INFINITE, FALSE);
 				if (!ret) {
 					SetLastError(ERROR_TIMEOUT);
 					goto Fail;
 				}
-			}
-			else {
-				//
-				// Get the results of the asynchronous operation
-				//
-				ret = GetOverlappedResult(Device->Handle, &overlapped, &bytesWritten, FALSE);
 			}
 		}
 
@@ -425,7 +435,7 @@ WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeo
 					readComplete.RequestId = event->RequestId;
 					readComplete.Status = STATUS_NO_MEMORY;
 					readComplete.DataLength = 0;
-					DeviceIoControlInSync(Device->Handle, IOCTL_WINUHID_COMPLETE_READ_EVENT, &readComplete, sizeof(readComplete));
+					DeviceIoControlInSync(Device->Handle, overlappedEvent.Get(), IOCTL_WINUHID_COMPLETE_READ_EVENT, &readComplete, sizeof(readComplete));
 
 					SetLastError(ERROR_OUTOFMEMORY);
 					goto Fail;
@@ -450,7 +460,7 @@ WINUHID_API VOID WinUHidCompleteWriteEvent(PWINUHID_DEVICE Device, PCWINUHID_EVE
 
 	eventComplete.RequestId = Event->RequestId;
 	eventComplete.Status = Success ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
-	DeviceIoControlInSync(Device->Handle, IOCTL_WINUHID_COMPLETE_WRITE_EVENT, &eventComplete, sizeof(eventComplete));
+	DeviceIoControlInSync(Device->Handle, NULL, IOCTL_WINUHID_COMPLETE_WRITE_EVENT, &eventComplete, sizeof(eventComplete));
 
 	HeapFree(GetProcessHeap(), 0, const_cast<PWINUHID_EVENT>(Event));
 }
@@ -487,7 +497,7 @@ WINUHID_API VOID WinUHidCompleteReadEvent(PWINUHID_DEVICE Device, PCWINUHID_EVEN
 		eventComplete->DataLength = 0;
 	}
 
-	DeviceIoControlInSync(Device->Handle, IOCTL_WINUHID_COMPLETE_READ_EVENT, eventComplete, FIELD_OFFSET(WINUHID_READ_EVENT_COMPLETE, Data) + eventComplete->DataLength);
+	DeviceIoControlInSync(Device->Handle, NULL, IOCTL_WINUHID_COMPLETE_READ_EVENT, eventComplete, FIELD_OFFSET(WINUHID_READ_EVENT_COMPLETE, Data) + eventComplete->DataLength);
 
 	HeapFree(GetProcessHeap(), 0, const_cast<PWINUHID_EVENT>(Event));
 }
