@@ -56,6 +56,11 @@ typedef CONST WINUHID_XONE_INPUT_REPORT *PCWINUHID_XONE_INPUT_REPORT;
 #include <poppack.h>
 
 //
+// Initializes the input report with neutral data.
+//
+WINUHID_API VOID WinUHidXOneInitializeInputReport(PWINUHID_XONE_INPUT_REPORT Report);
+
+//
 // Submits an input report to the device.
 //
 // On failure, the function will return FALSE. Call GetLastError() to the error code.

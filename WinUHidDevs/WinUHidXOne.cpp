@@ -152,8 +152,7 @@ const WINUHID_DEVICE_CONFIG k_XOneConfig =
 	L"HID\\VID_045E&PID_02FF&IG_00\0",
 };
 
-typedef struct _XONE_OUTPUT_REPORT
-{
+typedef struct _XONE_OUTPUT_REPORT {
 	union {
 		struct {
 			UCHAR MotorsEnabled;
@@ -367,17 +366,24 @@ WINUHID_API PWINUHID_XONE_GAMEPAD WinUHidXOneCreate(PCWINUHID_PRESET_DEVICE_INFO
 	// Send an neutral input report
 	//
 	WINUHID_XONE_INPUT_REPORT inputReport;
-	inputReport.LeftStickX = 0x8000;
-	inputReport.LeftStickY = 0x8000;
-	inputReport.RightStickX = 0x8000;
-	inputReport.RightStickY = 0x8000;
-	inputReport.BatteryLevel = 0xFF;
+	WinUHidXOneInitializeInputReport(&inputReport);
 	if (!WinUHidXOneReportInput(gamepad, &inputReport)) {
 		WinUHidXOneDestroy(gamepad);
 		return NULL;
 	}
 
 	return gamepad;
+}
+
+WINUHID_API VOID WinUHidXOneInitializeInputReport(PWINUHID_XONE_INPUT_REPORT Report)
+{
+	RtlZeroMemory(Report, sizeof(*Report));
+
+	Report->LeftStickX = 0x8000;
+	Report->LeftStickY = 0x8000;
+	Report->RightStickX = 0x8000;
+	Report->RightStickY = 0x8000;
+	Report->BatteryLevel = 0xFF;
 }
 
 WINUHID_API BOOL WinUHidXOneReportInput(PWINUHID_XONE_GAMEPAD Gamepad, PCWINUHID_XONE_INPUT_REPORT Report)
