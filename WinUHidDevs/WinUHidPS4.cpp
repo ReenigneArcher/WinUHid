@@ -731,7 +731,7 @@ WINUHID_API VOID WinUHidPS4SetTouchReport(PWINUHID_PS4_INPUT_REPORT Report, UCHA
 		Report->TouchReports[0].TouchPoints[TouchIndex].ContactSeq |= 0x80;
 	}
 	Report->TouchReports[0].TouchPoints[TouchIndex].XLowPart = TouchX & 0xFF;
-	Report->TouchReports[0].TouchPoints[TouchIndex].XHighPart = (TouchX >> 4) & 0xF;
+	Report->TouchReports[0].TouchPoints[TouchIndex].XHighPart = (TouchX >> 8) & 0xF;
 	Report->TouchReports[0].TouchPoints[TouchIndex].YLowPart = TouchY & 0xF;
 	Report->TouchReports[0].TouchPoints[TouchIndex].YHighPart = (TouchY >> 4) & 0xFF;
 	Report->TouchReports[0].Timestamp++;
