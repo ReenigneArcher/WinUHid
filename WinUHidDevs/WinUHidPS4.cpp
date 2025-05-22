@@ -278,23 +278,19 @@ typedef struct PS4_OUTPUT_REPORT {
 #include <poppack.h>
 
 typedef struct _PS4_LED_STATE {
-	union {
-		struct {
-			UCHAR LedRed;
-			UCHAR LedGreen;
-			UCHAR LedBlue;
+	UCHAR LedRed;
+	UCHAR LedGreen;
+	UCHAR LedBlue;
 
-			UCHAR BlinkOn;
-			UCHAR BlinkOff;
-		};
-		LONG64 Data;
-	} u;
+	UCHAR BlinkOn;
+	UCHAR BlinkOff;
 } PS4_LED_STATE, *PPS4_LED_STATE;
 #define PS4_BLINK_TIME_TO_MILLIS(x) ((x) * 10)
 
 typedef struct _WINUHID_PS4_GAMEPAD {
 	PWINUHID_DEVICE Device;
 	BOOL Stopping;
+	SRWLOCK Lock;
 
 	PWINUHID_PS4_FF_CB RumbleCallback;
 	PWINUHID_PS4_LED_CB LedCallback;
@@ -306,7 +302,6 @@ typedef struct _WINUHID_PS4_GAMEPAD {
 
 	HANDLE InputThread;
 	HANDLE InputUpdatedEvent;
-	SRWLOCK InputLock;
 	WINUHID_PS4_INPUT_REPORT LastInputReport;
 
 	UCHAR MacAddress[6];
@@ -419,37 +414,17 @@ VOID WinUHidPS4Callback(PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHID
 		// If we have an LED thread and new LED state, pass the data over to it
 		//
 		if (gamepad->LedThread && (outputReport->LedValid || outputReport->BlinkValid)) {
-			PS4_LED_STATE oldLedState;
-			PS4_LED_STATE newLedState;
-
-			//
-			// We have to merge the valid parts of the LED state in this report
-			// with the existing state atomically to avoid the LED thread possibly
-			// observing a torn write.
-			//
-			do {
-				oldLedState = gamepad->LedState;
-				newLedState = oldLedState;
-
-				//
-				// Use the output report's LED state only if it was set
-				//
-				if (outputReport->LedValid) {
-					newLedState.u.LedRed = outputReport->LedRed;
-					newLedState.u.LedGreen = outputReport->LedGreen;
-					newLedState.u.LedBlue = outputReport->LedBlue;
-				}
-
-				//
-				// Use the output report's blink state only if it was set
-				//
-				if (outputReport->BlinkValid) {
-					newLedState.u.BlinkOn = outputReport->BlinkOn;
-					newLedState.u.BlinkOff = outputReport->BlinkOff;
-				}
-
-			} while (InterlockedCompareExchange64(&gamepad->LedState.u.Data, newLedState.u.Data, oldLedState.u.Data) != oldLedState.u.Data);
-
+			AcquireSRWLockExclusive(&gamepad->Lock);
+			if (outputReport->LedValid) {
+				gamepad->LedState.LedRed = outputReport->LedRed;
+				gamepad->LedState.LedGreen = outputReport->LedGreen;
+				gamepad->LedState.LedBlue = outputReport->LedBlue;
+			}
+			if (outputReport->BlinkValid) {
+				gamepad->LedState.BlinkOn = outputReport->BlinkOn;
+				gamepad->LedState.BlinkOff = outputReport->BlinkOff;
+			}
+			ReleaseSRWLockExclusive(&gamepad->Lock);
 			SetEvent(gamepad->LedUpdatedEvent);
 		}
 
@@ -480,15 +455,16 @@ DWORD WINAPI LedThreadProc(LPVOID lpParameter)
 		//
 		// Load the most recent LED state
 		//
-		PS4_LED_STATE ledState;
+		AcquireSRWLockShared(&device->Lock);
+		PS4_LED_STATE ledState = device->LedState;
 		ResetEvent(device->LedUpdatedEvent);
-		ledState.u.Data = InterlockedExchange64(&device->LedState.u.Data, 0);
+		ReleaseSRWLockShared(&device->Lock);
 
 		//
 		// If this is not a request to blink, turn on the LEDs and wait for the next request
 		//
-		if (ledState.u.BlinkOn == 0 && ledState.u.BlinkOff == 0) {
-			device->LedCallback(device->CallbackContext, ledState.u.LedRed, ledState.u.LedGreen, ledState.u.LedBlue);
+		if (ledState.BlinkOn == 0 && ledState.BlinkOff == 0) {
+			device->LedCallback(device->CallbackContext, ledState.LedRed, ledState.LedGreen, ledState.LedBlue);
 			continue;
 		}
 
@@ -499,12 +475,12 @@ DWORD WINAPI LedThreadProc(LPVOID lpParameter)
 			//
 			// Turn the LEDs on
 			//
-			device->LedCallback(device->CallbackContext, ledState.u.LedRed, ledState.u.LedGreen, ledState.u.LedBlue);
+			device->LedCallback(device->CallbackContext, ledState.LedRed, ledState.LedGreen, ledState.LedBlue);
 
 			//
 			// Wait for the blink on time
 			//
-			result = WaitForSingleObject(device->LedUpdatedEvent, PS4_BLINK_TIME_TO_MILLIS(ledState.u.BlinkOn));
+			result = WaitForSingleObject(device->LedUpdatedEvent, PS4_BLINK_TIME_TO_MILLIS(ledState.BlinkOn));
 			if (result == WAIT_OBJECT_0 || device->Stopping) {
 				break;
 			}
@@ -517,7 +493,7 @@ DWORD WINAPI LedThreadProc(LPVOID lpParameter)
 			//
 			// Wait for the blink off time
 			//
-			result = WaitForSingleObject(device->LedUpdatedEvent, PS4_BLINK_TIME_TO_MILLIS(ledState.u.BlinkOff));
+			result = WaitForSingleObject(device->LedUpdatedEvent, PS4_BLINK_TIME_TO_MILLIS(ledState.BlinkOff));
 			if (result == WAIT_OBJECT_0 || device->Stopping) {
 				break;
 			}
@@ -565,11 +541,11 @@ DWORD WINAPI InputThreadProc(LPVOID lpParameter)
 		//
 		// Fetch the latest input report and the current time
 		//
-		AcquireSRWLockExclusive(&device->InputLock);
+		AcquireSRWLockShared(&device->Lock);
 		WINUHID_PS4_INPUT_REPORT inputReport = device->LastInputReport;
 		QueryPerformanceCounter(&now);
 		ResetEvent(device->InputUpdatedEvent);
-		ReleaseSRWLockExclusive(&device->InputLock);
+		ReleaseSRWLockShared(&device->Lock);
 
 		//
 		// Compute the time between reports to determine the timestamp increment
@@ -609,6 +585,7 @@ WINUHID_API PWINUHID_PS4_GAMEPAD WinUHidPS4Create(PCWINUHID_PS4_GAMEPAD_INFO Inf
 		return NULL;
 	}
 
+	InitializeSRWLock(&gamepad->Lock);
 	gamepad->RumbleCallback = RumbleCallback;
 	gamepad->LedCallback = LedCallback;
 	gamepad->CallbackContext = CallbackContext;
@@ -617,7 +594,6 @@ WINUHID_API PWINUHID_PS4_GAMEPAD WinUHidPS4Create(PCWINUHID_PS4_GAMEPAD_INFO Inf
 		RtlCopyMemory(&gamepad->MacAddress[0], &Info->MacAddress[0], sizeof(gamepad->MacAddress));
 	}
 
-	InitializeSRWLock(&gamepad->InputLock);
 	WinUHidPS4InitializeInputReport(&gamepad->LastInputReport);
 
 	gamepad->InputUpdatedEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
@@ -695,9 +671,9 @@ WINUHID_API BOOL WinUHidPS4ReportInput(PWINUHID_PS4_GAMEPAD Gamepad, PCWINUHID_P
 	//
 	// Pass the input report off to the input thread to send
 	//
-	AcquireSRWLockExclusive(&Gamepad->InputLock);
+	AcquireSRWLockExclusive(&Gamepad->Lock);
 	Gamepad->LastInputReport = *Report;
-	ReleaseSRWLockExclusive(&Gamepad->InputLock);
+	ReleaseSRWLockExclusive(&Gamepad->Lock);
 	SetEvent(Gamepad->InputUpdatedEvent);
 
 	return TRUE;
