@@ -690,13 +690,13 @@ WINUHID_API VOID WinUHidPS4InitializeInputReport(PWINUHID_PS4_INPUT_REPORT Repor
 	Report->RightStickY = 0x80;
 	Report->Hat = 0x8;
 
-	WinUHidPS4SetTouchReport(Report, 0, FALSE, 0, 0);
-	WinUHidPS4SetTouchReport(Report, 1, FALSE, 0, 0);
+	WinUHidPS4SetTouchState(Report, 0, FALSE, 0, 0);
+	WinUHidPS4SetTouchState(Report, 1, FALSE, 0, 0);
 
 	WinUHidPS4SetBatteryState(Report, TRUE, 100);
 }
 
-WINUHID_API VOID WinUHidPS4SetTouchReport(PWINUHID_PS4_INPUT_REPORT Report, UCHAR TouchIndex, BOOL TouchDown, USHORT TouchX, USHORT TouchY)
+WINUHID_API VOID WinUHidPS4SetTouchState(PWINUHID_PS4_INPUT_REPORT Report, UCHAR TouchIndex, BOOL TouchDown, USHORT TouchX, USHORT TouchY)
 {
 	Report->TouchReportCount = 1;
 	if (TouchDown) {

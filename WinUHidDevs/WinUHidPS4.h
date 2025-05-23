@@ -120,7 +120,7 @@ WINUHID_API VOID WinUHidPS4SetBatteryState(PWINUHID_PS4_INPUT_REPORT Report, BOO
 // The PS4 controller supports 2 simultaneous touches (TouchIndex 0 and 1).
 // The touchpad is 1920x943, so TouchX/Y must be within those dimensions.
 //
-WINUHID_API VOID WinUHidPS4SetTouchReport(PWINUHID_PS4_INPUT_REPORT Report, UCHAR TouchIndex, BOOL TouchDown, USHORT TouchX, USHORT TouchY);
+WINUHID_API VOID WinUHidPS4SetTouchState(PWINUHID_PS4_INPUT_REPORT Report, UCHAR TouchIndex, BOOL TouchDown, USHORT TouchX, USHORT TouchY);
 
 //
 // Submits an input report to the device.
