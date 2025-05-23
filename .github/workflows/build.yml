@@ -36,6 +36,12 @@ jobs:
     - name: Restore NuGet packages
       run: msbuild -t:restore -p:RestorePackagesConfig=true
 
+    - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11
+
+    - name: Install vcpkg MSBuild integration
+      run: ${{ github.workspace }}/vcpkg/vcpkg.exe integrate install
+
     - name: Build solution
       run: msbuild WinUHid.sln /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /m /verbosity:minimal
 
