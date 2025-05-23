@@ -706,8 +706,8 @@ WINUHID_API VOID WinUHidPS4SetTouchState(PWINUHID_PS4_INPUT_REPORT Report, UCHAR
 {
 	Report->TouchReportCount = 1;
 	if (TouchDown) {
-		Report->TouchReports[0].TouchPoints[TouchIndex].ContactSeq &= ~0x80;
 		Report->TouchReports[0].TouchPoints[TouchIndex].ContactSeq++;
+		Report->TouchReports[0].TouchPoints[TouchIndex].ContactSeq &= ~0x80;
 	}
 	else {
 		Report->TouchReports[0].TouchPoints[TouchIndex].ContactSeq |= 0x80;
