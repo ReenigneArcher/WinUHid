@@ -380,7 +380,13 @@ VOID WinUHidPS4Callback(PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHID
 				0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 			};
 
-			RtlCopyMemory(&data[1], gamepad->MacAddress, sizeof(gamepad->MacAddress));
+			//
+			// The MAC address is reported in reverse order
+			//
+			for (int i = 0; i < sizeof(gamepad->MacAddress); i++) {
+				data[i + 1] = gamepad->MacAddress[sizeof(gamepad->MacAddress) - (i + 1)];
+			}
+
 			WinUHidCompleteReadEvent(Device, Event, data, sizeof(data));
 			break;
 		}
