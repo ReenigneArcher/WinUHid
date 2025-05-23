@@ -738,6 +738,37 @@ WINUHID_API VOID WinUHidPS4SetBatteryState(PWINUHID_PS4_INPUT_REPORT Report, BOO
 	}
 }
 
+WINUHID_API VOID WinUHidPS4SetHatState(PWINUHID_PS4_INPUT_REPORT Report, INT HatX, INT HatY)
+{
+	if (HatX == 0 && HatY == 0) {
+		Report->Hat = 0x8; // Neutral
+	}
+	else if (HatX < 0 && HatY < 0) {
+		Report->Hat = 0x7; // Top-left
+	}
+	else if (HatX < 0 && HatY == 0) {
+		Report->Hat = 0x6; // Left
+	}
+	else if (HatX < 0 && HatY > 0) {
+		Report->Hat = 0x5; // Bottom-left
+	}
+	else if (HatX == 0 && HatY > 0) {
+		Report->Hat = 0x4; // Bottom
+	}
+	else if (HatX > 0 && HatY > 0) {
+		Report->Hat = 0x3; // Bottom-right
+	}
+	else if (HatX > 0 && HatY == 0) {
+		Report->Hat = 0x2; // Right
+	}
+	else if (HatX > 0 && HatY < 0) {
+		Report->Hat = 0x1; // Top-right
+	}
+	else {
+		Report->Hat = 0x0; // Top
+	}
+}
+
 WINUHID_API VOID WinUHidPS4Destroy(PWINUHID_PS4_GAMEPAD Gamepad)
 {
 	if (!Gamepad) {

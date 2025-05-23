@@ -15,7 +15,7 @@ typedef struct _WINUHID_PS4_INPUT_REPORT
 	UCHAR RightStickX; // 0x80 is centered
 	UCHAR RightStickY; // 0x80 is centered
 
-	UCHAR Hat : 4;
+	UCHAR Hat : 4; // Use WinUHidPS4SetHatState()
 	UCHAR ButtonSquare : 1;
 	UCHAR ButtonCross : 1;
 	UCHAR ButtonCircle : 1;
@@ -36,7 +36,7 @@ typedef struct _WINUHID_PS4_INPUT_REPORT
 	UCHAR RightTrigger;
 
 	USHORT Timestamp; // Calculated by WinUHid
-	UCHAR BatteryLevel; // 0 to 0xFF
+	UCHAR BatteryLevel; // Use WinUHidPS4SetBatteryState()
 
 	USHORT GyroX;
 	USHORT GyroY;
@@ -45,7 +45,7 @@ typedef struct _WINUHID_PS4_INPUT_REPORT
 	USHORT AccelY;
 	USHORT AccelZ;
 	UCHAR Reserved2[5];
-	BYTE BatteryLevelSpecial;
+	BYTE BatteryLevelSpecial; // Use WinUHidPS4SetBatteryState()
 
 	UCHAR Status[2];
 
@@ -108,6 +108,15 @@ WINUHID_API PWINUHID_PS4_GAMEPAD WinUHidPS4Create(PCWINUHID_PS4_GAMEPAD_INFO Inf
 // Initializes the input report with neutral data.
 //
 WINUHID_API VOID WinUHidPS4InitializeInputReport(PWINUHID_PS4_INPUT_REPORT Report);
+
+//
+// Sets the hat state in the input report.
+//
+// Each axis of the hat can have one of 3 values: -1, 0, 1
+//
+// Negative values are left/up. Positive values are right/down. 0 is neutral.
+//
+WINUHID_API VOID WinUHidPS4SetHatState(PWINUHID_PS4_INPUT_REPORT Report, INT HatX, INT HatY);
 
 //
 // Sets the battery state in the input report.
