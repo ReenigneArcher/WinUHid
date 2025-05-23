@@ -386,6 +386,37 @@ WINUHID_API VOID WinUHidXOneInitializeInputReport(PWINUHID_XONE_INPUT_REPORT Rep
 	Report->BatteryLevel = 0xFF;
 }
 
+WINUHID_API VOID WinUHidXOneSetHatState(PWINUHID_XONE_INPUT_REPORT Report, INT HatX, INT HatY)
+{
+	if (HatX == 0 && HatY == 0) {
+		Report->Hat = 0x0; // Neutral
+	}
+	else if (HatX < 0 && HatY < 0) {
+		Report->Hat = 0x8; // Top-left
+	}
+	else if (HatX < 0 && HatY == 0) {
+		Report->Hat = 0x7; // Left
+	}
+	else if (HatX < 0 && HatY > 0) {
+		Report->Hat = 0x6; // Bottom-left
+	}
+	else if (HatX == 0 && HatY > 0) {
+		Report->Hat = 0x5; // Bottom
+	}
+	else if (HatX > 0 && HatY > 0) {
+		Report->Hat = 0x4; // Bottom-right
+	}
+	else if (HatX > 0 && HatY == 0) {
+		Report->Hat = 0x3; // Right
+	}
+	else if (HatX > 0 && HatY < 0) {
+		Report->Hat = 0x2; // Top-right
+	}
+	else {
+		Report->Hat = 0x1; // Top
+	}
+}
+
 WINUHID_API BOOL WinUHidXOneReportInput(PWINUHID_XONE_GAMEPAD Gamepad, PCWINUHID_XONE_INPUT_REPORT Report)
 {
 	return WinUHidSubmitInputReport(Gamepad->Device, Report, sizeof(*Report));

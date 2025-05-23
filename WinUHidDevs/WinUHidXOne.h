@@ -7,6 +7,8 @@ typedef struct _WINUHID_XONE_GAMEPAD *PWINUHID_XONE_GAMEPAD;
 //
 // Optional callback to be invoked when the state of the force feedback motors change.
 //
+// Note: The values are specified as percentages!
+//
 // NOTE: This callback is invoked in the context of rumble thread and delaying it
 // may impact the reliability and timing of force feedback effects. Do not perform
 // any operations that may block in this context.
@@ -45,7 +47,7 @@ typedef struct _WINUHID_XONE_INPUT_REPORT
 	UCHAR ButtonLS : 1;
 	UCHAR ButtonRS : 1;
 	UCHAR Reserved3: 6;
-	UCHAR Hat : 4;
+	UCHAR Hat : 4; // Use WinUHidXOneSetHatState()
 	UCHAR Reserved4: 4;
 	UCHAR ButtonHome : 1;
 	UCHAR Reserved5: 7;
@@ -59,6 +61,15 @@ typedef CONST WINUHID_XONE_INPUT_REPORT *PCWINUHID_XONE_INPUT_REPORT;
 // Initializes the input report with neutral data.
 //
 WINUHID_API VOID WinUHidXOneInitializeInputReport(PWINUHID_XONE_INPUT_REPORT Report);
+
+//
+// Sets the hat state in the input report.
+//
+// Each axis of the hat can have one of 3 values: -1, 0, 1
+//
+// Negative values are left/up. Positive values are right/down. 0 is neutral.
+//
+WINUHID_API VOID WinUHidXOneSetHatState(PWINUHID_XONE_INPUT_REPORT Report, INT HatX, INT HatY);
 
 //
 // Submits an input report to the device.
