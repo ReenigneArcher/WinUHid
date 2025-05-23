@@ -1,8 +1,5 @@
 #include "pch.h"
-#include "SDLGamepadManager.h"
-
-#include <wrl/wrappers/corewrappers.h>
-using namespace Microsoft::WRL;
+#include "Utilities.h"
 
 TEST(PS4, CreateBasic) {
 	auto gamepad = WinUHidPS4Create(NULL, NULL, NULL, NULL);
@@ -262,36 +259,6 @@ TEST(PS4, TouchpadMapping) {
 }
 
 #define MAKE_LED_VALUE(r, g, b) ((r) << 16 | (g) << 8 | (b))
-template <typename T>
-class CallbackData
-{
-public:
-	CallbackData() : m_Data()
-	{
-		m_Event.Attach(CreateEventW(NULL, FALSE, FALSE, NULL));
-	}
-
-	void Signal(T Data) {
-		m_Data = Data;
-		SetEvent(m_Event.Get());
-	}
-
-	void Quiesce() {
-		while (WaitForSingleObject(m_Event.Get(), 1000) == WAIT_OBJECT_0);
-	}
-
-	T Wait() {
-		if (WaitForSingleObject(m_Event.Get(), 10000) != WAIT_OBJECT_0) {
-			return T();
-		}
-
-		return m_Data;
-	}
-
-private:
-	Wrappers::Event m_Event;
-	T m_Data;
-};
 
 TEST(PS4, LedEffects) {
 	CallbackData<UINT> ledState;
