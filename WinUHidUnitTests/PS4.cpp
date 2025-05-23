@@ -275,17 +275,17 @@ TEST(PS4, LedEffects) {
 	ledState.Quiesce();
 
 	for (Uint16 i = 0; i <= 0xFF; i++) {
-		SDL_SetGamepadLED(gm.GetGamepad(0), (Uint8)i, 0, 0);
+		ASSERT_TRUE(SDL_SetGamepadLED(gm.GetGamepad(0), (Uint8)i, 0, 0));
 		EXPECT_EQ(ledState.Wait(), MAKE_LED_VALUE(i, 0, 0));
 	}
 
 	for (Uint16 i = 0; i <= 0xFF; i++) {
-		SDL_SetGamepadLED(gm.GetGamepad(0), 0, (Uint8)i, 0);
+		ASSERT_TRUE(SDL_SetGamepadLED(gm.GetGamepad(0), 0, (Uint8)i, 0));
 		EXPECT_EQ(ledState.Wait(), MAKE_LED_VALUE(0, i, 0));
 	}
 
 	for (Uint16 i = 0; i <= 0xFF; i++) {
-		SDL_SetGamepadLED(gm.GetGamepad(0), 0, 0, (Uint8)i);
+		ASSERT_TRUE(SDL_SetGamepadLED(gm.GetGamepad(0), 0, 0, (Uint8)i));
 		EXPECT_EQ(ledState.Wait(), MAKE_LED_VALUE(0, 0, i));
 	}
 
@@ -309,12 +309,12 @@ TEST(PS4, RumbleEffects) {
 	rumbleState.Quiesce();
 
 	for (Uint16 i = 1; i <= 0xFF; i++) {
-		SDL_RumbleGamepad(gm.GetGamepad(0), i << 8, 0, 100);
+		ASSERT_TRUE(SDL_RumbleGamepad(gm.GetGamepad(0), i << 8, 0, 100));
 		EXPECT_EQ(rumbleState.Wait(), MAKE_RUMBLE_VALUE(i, 0));
 	}
 
 	for (Uint16 i = 1; i <= 0xFF; i++) {
-		SDL_RumbleGamepad(gm.GetGamepad(0), 0, i << 8, 100);
+		ASSERT_TRUE(SDL_RumbleGamepad(gm.GetGamepad(0), 0, i << 8, 100));
 		EXPECT_EQ(rumbleState.Wait(), MAKE_RUMBLE_VALUE(0, i));
 	}
 
