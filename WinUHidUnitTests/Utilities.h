@@ -10,7 +10,7 @@
 class SDLGamepadManager
 {
 public:
-	SDLGamepadManager();
+	explicit SDLGamepadManager(bool NeedsWindow = false);
 	~SDLGamepadManager();
 
 	void Detect();

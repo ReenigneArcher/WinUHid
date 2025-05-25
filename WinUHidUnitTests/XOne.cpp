@@ -169,7 +169,10 @@ TEST(XOne, RumbleEffects) {
 		}, &rumbleState);
 	ASSERT_TRUE(gamepad) << "Failed to create gamepad";
 
-	SDLGamepadManager gm;
+	//
+	// GameInput requires a window for focus tracking, so tell SDLGamepadManager to create one
+	//
+	SDLGamepadManager gm(true);
 	ASSERT_EQ(gm.GetGamepadCount(), 1) << "Unable to detect gamepad with SDL";
 
 	ASSERT_TRUE(SDL_RumbleGamepad(gm.GetGamepad(0), 32768, 0, 100));

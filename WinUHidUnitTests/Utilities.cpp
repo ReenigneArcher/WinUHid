@@ -20,18 +20,23 @@ int SDLGamepadManager::EventPollThread(void* ptr) {
 	return 0;
 }
 
-SDLGamepadManager::SDLGamepadManager() {
-	SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
+SDLGamepadManager::SDLGamepadManager(bool NeedsWindow) {
 	SDL_SetHint(SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "auto");
+	SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 
 	if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_VIDEO)) {
 		throw new std::exception(SDL_GetError());
 	}
 
-	//
-	// We need a window that can take focus in order for some gamepad APIs to work
-	//
-	m_Window = SDL_CreateWindow("Gamepad Unit Test", 800, 600, 0);
+	if (NeedsWindow) {
+		//
+		// We need a window that can take focus in order for some gamepad APIs to work
+		//
+		m_Window = SDL_CreateWindow("Gamepad Unit Test", 800, 600, 0);
+	}
+	else {
+		m_Window = NULL;
+	}
 
 	//
 	// Pump the event loop in a separate thread to keep the SDL joystick subsystem happy
