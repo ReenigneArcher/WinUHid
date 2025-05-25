@@ -272,21 +272,19 @@ TEST(PS4, LedEffects) {
 	SDLGamepadManager gm;
 	ASSERT_EQ(gm.GetGamepadCount(), 1) << "Unable to detect PS4 gamepad with SDL";
 
-	ledState.Quiesce();
-
 	for (Uint16 i = 0; i <= 0xFF; i++) {
 		ASSERT_TRUE(SDL_SetGamepadLED(gm.GetGamepad(0), (Uint8)i, 0, 0));
-		EXPECT_EQ(ledState.Wait(), MAKE_LED_VALUE(i, 0, 0));
+		EXPECT_CB_VALUE(ledState, MAKE_LED_VALUE(i, 0, 0));
 	}
 
 	for (Uint16 i = 0; i <= 0xFF; i++) {
 		ASSERT_TRUE(SDL_SetGamepadLED(gm.GetGamepad(0), 0, (Uint8)i, 0));
-		EXPECT_EQ(ledState.Wait(), MAKE_LED_VALUE(0, i, 0));
+		EXPECT_CB_VALUE(ledState, MAKE_LED_VALUE(0, i, 0));
 	}
 
 	for (Uint16 i = 0; i <= 0xFF; i++) {
 		ASSERT_TRUE(SDL_SetGamepadLED(gm.GetGamepad(0), 0, 0, (Uint8)i));
-		EXPECT_EQ(ledState.Wait(), MAKE_LED_VALUE(0, 0, i));
+		EXPECT_CB_VALUE(ledState, MAKE_LED_VALUE(0, 0, i));
 	}
 
 	WinUHidPS4Destroy(gamepad);
@@ -306,16 +304,14 @@ TEST(PS4, RumbleEffects) {
 	SDLGamepadManager gm;
 	ASSERT_EQ(gm.GetGamepadCount(), 1) << "Unable to detect PS4 gamepad with SDL";
 
-	rumbleState.Quiesce();
-
 	for (Uint16 i = 1; i <= 0xFF; i++) {
 		ASSERT_TRUE(SDL_RumbleGamepad(gm.GetGamepad(0), i << 8, 0, 100));
-		EXPECT_EQ(rumbleState.Wait(), MAKE_RUMBLE_VALUE(i, 0));
+		EXPECT_CB_VALUE(rumbleState, MAKE_RUMBLE_VALUE(i, 0));
 	}
 
 	for (Uint16 i = 1; i <= 0xFF; i++) {
 		ASSERT_TRUE(SDL_RumbleGamepad(gm.GetGamepad(0), 0, i << 8, 100));
-		EXPECT_EQ(rumbleState.Wait(), MAKE_RUMBLE_VALUE(0, i));
+		EXPECT_CB_VALUE(rumbleState, MAKE_RUMBLE_VALUE(0, i));
 	}
 
 	WinUHidPS4Destroy(gamepad);

@@ -57,6 +57,7 @@
       <GuardEHContMetadata>false</GuardEHContMetadata>
     </ClCompile>
     <Link>
+      <AdditionalDependencies>%(AdditionalDependencies);xinput.lib</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>

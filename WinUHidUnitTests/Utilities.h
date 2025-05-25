@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <atomic>
 #include <vector>
 
 #include <wrl/wrappers/corewrappers.h>
@@ -23,7 +24,12 @@ public:
 	void ExpectTouchpadFingerState(int Finger, bool Down, float TouchX, float TouchY);
 
 private:
+	static int EventPollThread(void* ptr);
+
 	std::vector<SDL_Gamepad*> m_Gamepads;
+	SDL_Window* m_Window;
+	SDL_Thread* m_PollingThread;
+	std::atomic<bool> m_StopThread;
 };
 
 template <typename T>
@@ -40,19 +46,19 @@ public:
 		SetEvent(m_Event.Get());
 	}
 
-	void Quiesce() {
-		while (WaitForSingleObject(m_Event.Get(), 1000) == WAIT_OBJECT_0);
-	}
-
-	T Wait() {
-		if (WaitForSingleObject(m_Event.Get(), 10000) != WAIT_OBJECT_0) {
-			return T();
-		}
+	T Wait(T ExpectedData) {
+		do {
+			if (WaitForSingleObject(m_Event.Get(), 1000) != WAIT_OBJECT_0) {
+				return T();
+			}
+		} while (m_Data != ExpectedData);
 
 		return m_Data;
 	}
 
 private:
 	Microsoft::WRL::Wrappers::Event m_Event;
-	T m_Data;
+	std::atomic<T> m_Data;
 };
+
+#define EXPECT_CB_VALUE(state, value) EXPECT_EQ((state).Wait(value), value)

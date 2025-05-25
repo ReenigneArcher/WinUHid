@@ -3,31 +3,60 @@
 
 #include <exception>
 
+int SDLGamepadManager::EventPollThread(void* ptr) {
+	auto gm = (SDLGamepadManager*)ptr;
+
+	while (!gm->m_StopThread) {
+		SDL_Event event;
+		if (!SDL_WaitEventTimeout(&event, 1)) {
+			continue;
+		}
+
+		if (event.type == SDL_EVENT_QUIT) {
+			ExitProcess(-1);
+		}
+	}
+
+	return 0;
+}
+
 SDLGamepadManager::SDLGamepadManager() {
 	SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
-	SDL_SetHint(SDL_HINT_JOYSTICK_RAWINPUT, "0");
 	SDL_SetHint(SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "auto");
-	SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 
-	if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+	if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_VIDEO)) {
 		throw new std::exception(SDL_GetError());
 	}
+
+	//
+	// We need a window that can take focus in order for some gamepad APIs to work
+	//
+	m_Window = SDL_CreateWindow("Gamepad Unit Test", 800, 600, 0);
+
+	//
+	// Pump the event loop in a separate thread to keep the SDL joystick subsystem happy
+	//
+	m_PollingThread = SDL_CreateThread(EventPollThread, "EventPollThread", this);
 
 	Detect();
 }
 
 SDLGamepadManager::~SDLGamepadManager() {
+	m_StopThread = 1;
+	SDL_WaitThread(m_PollingThread, NULL);
+
 	for (auto gamepad : m_Gamepads) {
 		SDL_CloseGamepad(gamepad);
 	}
 	m_Gamepads.clear();
 
-	SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+	SDL_DestroyWindow(m_Window);
+
+	SDL_QuitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_VIDEO);
 }
 
 void SDLGamepadManager::Detect() {
-	Sleep(100);
-	SDL_UpdateGamepads();
+	SDL_Delay(100);
 
 	//
 	// Close and reopen all detected gamepads
@@ -47,8 +76,7 @@ void SDLGamepadManager::Detect() {
 		m_Gamepads.push_back(gamepad);
 	}
 
-	Sleep(100);
-	SDL_UpdateGamepads();
+	SDL_Delay(100);
 }
 
 SDL_Gamepad* SDLGamepadManager::GetGamepad(size_t i) {
@@ -61,11 +89,10 @@ size_t SDLGamepadManager::GetGamepadCount() {
 
 void SDLGamepadManager::ExpectButtonState(SDL_GamepadButton Button, bool Down) {
 	for (int i = 0; i < 100; i++) {
-		SDL_UpdateGamepads();
 		if (SDL_GetGamepadButton(GetGamepad(0), Button) == Down) {
 			break;
 		}
-		Sleep(1);
+		SDL_Delay(1);
 	}
 
 	EXPECT_EQ(SDL_GetGamepadButton(GetGamepad(0), Button), Down) << "Button " << Button << " is not " << (Down ? "down" : "up");
@@ -80,11 +107,10 @@ void SDLGamepadManager::ExpectHatState(int HatX, int HatY) {
 
 void SDLGamepadManager::ExpectAxisValue(SDL_GamepadAxis Axis, Sint16 Value) {
 	for (int i = 0; i < 100; i++) {
-		SDL_UpdateGamepads();
 		if (SDL_GetGamepadAxis(GetGamepad(0), Axis) == Value) {
 			break;
 		}
-		Sleep(1);
+		SDL_Delay(1);
 	}
 
 	EXPECT_EQ(SDL_GetGamepadAxis(GetGamepad(0), Axis), Value) << "Axis " << Axis << " has unexpected value";
@@ -92,8 +118,6 @@ void SDLGamepadManager::ExpectAxisValue(SDL_GamepadAxis Axis, Sint16 Value) {
 
 void SDLGamepadManager::ExpectTouchpadFingerState(int Finger, bool Down, float TouchX, float TouchY) {
 	for (int i = 0; i < 100; i++) {
-		SDL_UpdateGamepads();
-
 		bool actualDown = false;
 		float actualX = 0;
 		float actualY = 0;
@@ -103,8 +127,7 @@ void SDLGamepadManager::ExpectTouchpadFingerState(int Finger, bool Down, float T
 			(!Down || (std::fabs(actualX - TouchX) < 0.0001 && std::fabs(actualY - TouchY) < 0.0001))) {
 			break;
 		}
-
-		Sleep(1);
+		SDL_Delay(1);
 	}
 
 	bool actualDown;
