@@ -153,24 +153,20 @@ const WINUHID_DEVICE_CONFIG k_XOneConfig =
 };
 
 typedef struct _XONE_OUTPUT_REPORT {
-	union {
-		struct {
-			UCHAR MotorsEnabled;
-			UCHAR LeftTriggerMotor;
-			UCHAR RightTriggerMotor;
-			UCHAR LeftMotor;
-			UCHAR RightMotor;
-			UCHAR Duration; // 10ms units
-			UCHAR Delay; // 10ms units
-			UCHAR Repeat;
-		};
-		LONG64 Data;
-	} u;
+	UCHAR MotorsEnabled;
+	UCHAR LeftTriggerMotor;
+	UCHAR RightTriggerMotor;
+	UCHAR LeftMotor;
+	UCHAR RightMotor;
+	UCHAR Duration; // 10ms units
+	UCHAR Delay; // 10ms units
+	UCHAR Repeat;
 } XONE_OUTPUT_REPORT, *PXONE_OUTPUT_REPORT;
 #define XONE_TIME_TO_FILETIME(x) ((x) * -100000)
 
 typedef struct _WINUHID_XONE_GAMEPAD {
 	PWINUHID_DEVICE Device;
+	SRWLOCK Lock;
 
 	HANDLE RumbleThread;
 	HANDLE RumbleUpdatedEvent;
@@ -198,7 +194,9 @@ VOID WinUHidXOneCallback(PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHI
 	//
 	if (gamepad->RumbleThread) {
 		auto report = (PXONE_OUTPUT_REPORT)Event->Write.Data;
-		InterlockedExchange64(&gamepad->RumbleState.u.Data, report->u.Data);
+		AcquireSRWLockExclusive(&gamepad->Lock);
+		gamepad->RumbleState = *report;
+		ReleaseSRWLockExclusive(&gamepad->Lock);
 		SetEvent(gamepad->RumbleUpdatedEvent);
 	}
 
@@ -235,26 +233,27 @@ DWORD WINAPI RumbleThreadProc(LPVOID lpParameter)
 		//
 		// Load the most recent FF output report
 		//
-		XONE_OUTPUT_REPORT outputReport;
+		AcquireSRWLockShared(&device->Lock);
+		XONE_OUTPUT_REPORT outputReport = device->RumbleState;
 		ResetEvent(device->RumbleUpdatedEvent);
-		outputReport.u.Data = InterlockedExchange64(&device->RumbleState.u.Data, 0);
+		ReleaseSRWLockShared(&device->Lock);
 
 		//
 		// Determine the motor amplitudes to send to the callback
 		//
-		UCHAR leftMotor = (outputReport.u.MotorsEnabled & 0x1) ? outputReport.u.LeftMotor : 0;
-		UCHAR rightMotor = (outputReport.u.MotorsEnabled & 0x2) ? outputReport.u.RightMotor : 0;
-		UCHAR leftTriggerMotor = (outputReport.u.MotorsEnabled & 0x4) ? outputReport.u.LeftTriggerMotor : 0;
-		UCHAR rightTriggerMotor = (outputReport.u.MotorsEnabled & 0x8) ? outputReport.u.RightTriggerMotor : 0;
+		UCHAR leftMotor = (outputReport.MotorsEnabled & 0x1) ? outputReport.LeftMotor : 0;
+		UCHAR rightMotor = (outputReport.MotorsEnabled & 0x2) ? outputReport.RightMotor : 0;
+		UCHAR leftTriggerMotor = (outputReport.MotorsEnabled & 0x4) ? outputReport.LeftTriggerMotor : 0;
+		UCHAR rightTriggerMotor = (outputReport.MotorsEnabled & 0x8) ? outputReport.RightTriggerMotor : 0;
 
-		for (USHORT i = 0; i <= outputReport.u.Repeat; i++) {
+		for (USHORT i = 0; i <= outputReport.Repeat; i++) {
 			HANDLE objects[]{ device->RumbleUpdatedEvent, timer.Get() };
 			LARGE_INTEGER dueTime;
 
 			//
 			// Check to see if we need to do anything
 			//
-			if (outputReport.u.Duration == 0) {
+			if (outputReport.Duration == 0) {
 				device->Callback(device->CallbackContext, 0, 0, 0, 0);
 				break;
 			}
@@ -266,8 +265,8 @@ DWORD WINAPI RumbleThreadProc(LPVOID lpParameter)
 			//
 			// Wait for the delay period before initiating the FF effect
 			//
-			if (outputReport.u.Delay != 0) {
-				dueTime.QuadPart = XONE_TIME_TO_FILETIME(outputReport.u.Delay);
+			if (outputReport.Delay != 0) {
+				dueTime.QuadPart = XONE_TIME_TO_FILETIME(outputReport.Delay);
 				SetWaitableTimer(timer.Get(), &dueTime, 0, NULL, NULL, FALSE);
 				result = WaitForMultipleObjects(ARRAYSIZE(objects), objects, FALSE, INFINITE);
 				if (result == WAIT_OBJECT_0 || device->Stopping) {
@@ -286,15 +285,15 @@ DWORD WINAPI RumbleThreadProc(LPVOID lpParameter)
 			//
 			// Wait for the duration period before stopping the FF effect
 			//
-			dueTime.QuadPart = XONE_TIME_TO_FILETIME(outputReport.u.Duration);
-			if (outputReport.u.Delay == 0 && outputReport.u.Repeat != 0) {
+			dueTime.QuadPart = XONE_TIME_TO_FILETIME(outputReport.Duration);
+			if (outputReport.Delay == 0 && outputReport.Repeat != 0) {
 				//
 				// We specially handle the common case of repeats with no delay specified.
 				// We can optimize the series of short waits and motor on/off cycles by
 				// consolidating all the repeats into the initial wait.
 				//
-				dueTime.QuadPart += dueTime.QuadPart * outputReport.u.Repeat;
-				outputReport.u.Repeat = 0;
+				dueTime.QuadPart += dueTime.QuadPart * outputReport.Repeat;
+				outputReport.Repeat = 0;
 			}
 			SetWaitableTimer(timer.Get(), &dueTime, 0, NULL, NULL, FALSE);
 			result = WaitForMultipleObjects(ARRAYSIZE(objects), objects, FALSE, INFINITE);
@@ -331,6 +330,7 @@ WINUHID_API PWINUHID_XONE_GAMEPAD WinUHidXOneCreate(PCWINUHID_PRESET_DEVICE_INFO
 		return NULL;
 	}
 
+	InitializeSRWLock(&gamepad->Lock);
 	gamepad->Callback = Callback;
 	gamepad->CallbackContext = CallbackContext;
 
