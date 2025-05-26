@@ -33,6 +33,12 @@ private:
 	std::atomic<bool> m_StopThread;
 };
 
+class SDLHIDManager
+{
+public:
+	SDL_hid_device* OpenDevice(USHORT VendorId, USHORT ProductId);
+};
+
 template <typename T>
 class CallbackData
 {

@@ -165,3 +165,19 @@ void SDLGamepadManager::ExpectSensorData(SDL_SensorType sensor, float* values) {
 	ASSERT_NEAR(actualValues[1], values[1], 0.01) << "Sensor " << sensor << "has unexpected Y coordinate";
 	ASSERT_NEAR(actualValues[2], values[2], 0.01) << "Sensor " << sensor << "has unexpected Z coordinate";
 }
+
+SDL_hid_device* SDLHIDManager::OpenDevice(USHORT VendorId, USHORT ProductId) {
+	for (int i = 0; i < 5; i++) {
+		//
+		// Wait a second for PnP to enumerate and start the child device
+		//
+		SDL_Delay(1000);
+
+		SDL_hid_device* device = SDL_hid_open(VendorId, ProductId, NULL);
+		if (device) {
+			return device;
+		}
+	}
+
+	return NULL;
+}

@@ -86,6 +86,7 @@
     <ClInclude Include="Utilities.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="HIDLL.cpp" />
     <ClCompile Include="PS4.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
@@ -96,6 +97,9 @@
   <ItemGroup>
     <ProjectReference Include="..\WinUHidDevs\WinUHidDevs.vcxproj">
       <Project>{b5b4e65e-4040-47c5-b9aa-677185722613}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\WinUHid\WinUHid.vcxproj">
+      <Project>{91cb38a2-bd18-4b0b-a8fb-6e0172f525f8}</Project>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
