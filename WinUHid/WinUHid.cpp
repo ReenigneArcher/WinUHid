@@ -42,6 +42,15 @@ typedef struct _WINUHID_DEVICE {
 	HANDLE EventThread;
 	PWINUHID_EVENT_CALLBACK EventCallback;
 	PVOID CallbackContext;
+
+	//
+	// Read report throttling data
+	//
+	HANDLE ReadThread;
+	HANDLE ThrottlingTimer;
+	LARGE_INTEGER ThrottlingPeriod;
+	HANDLE ReadReportReadyEvent;
+	PCWINUHID_EVENT PendingReadReportEvent;
 } WINUHID_DEVICE, *PWINUHID_DEVICE;
 
 size_t MultiSzWcsLen(PCWSTR MultiSzString)
@@ -140,6 +149,22 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config)
 	device->State = WINUHID_DEVICE_STATE::Created;
 	device->EventBufferSizeHint = 128;
 
+	if ((Config->SupportedEvents & WINUHID_EVENT_READ_REPORT) && Config->ReadReportPeriodUs != 0) {
+		device->ThrottlingTimer = CreateWaitableTimerExW(NULL, NULL,
+			CREATE_WAITABLE_TIMER_MANUAL_RESET | CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+			TIMER_ALL_ACCESS);
+		if (!device->ThrottlingTimer) {
+			goto Fail;
+		}
+
+		device->ThrottlingPeriod.QuadPart = -10LL * Config->ReadReportPeriodUs;
+
+		device->ReadReportReadyEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+		if (!device->ReadReportReadyEvent) {
+			goto Fail;
+		}
+	}
+
 	device->Handle = CreateFileW(WINUHID_WIN32_PATH,
 		GENERIC_READ | GENERIC_WRITE,
 		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -214,6 +239,45 @@ WINUHID_API BOOL WinUHidSubmitInputReport(PWINUHID_DEVICE Device, LPCVOID Report
 		return FALSE;
 	}
 
+	//
+	// If this is a throttled device, we may be holding an event for the throttling
+	// period. We will immediately complete that pending request now if the user
+	// has explicitly provided new input for us.
+	//
+	if (Device->ReadReportReadyEvent) {
+		if (WaitForSingleObject(Device->ReadReportReadyEvent, 0) == WAIT_OBJECT_0) {
+			//
+			// If we successfully waited on the report event, we now own the pending event
+			//
+			auto event = (PCWINUHID_EVENT)InterlockedExchangePointer((volatile PVOID*)&Device->PendingReadReportEvent, NULL);
+			if (!event) {
+				//
+				// This should be impossible, but we'll handle it anyway
+				//
+				SetLastError(ERROR_NOT_READY);
+				return FALSE;
+			}
+
+			//
+			// Complete the waiting request with the new data
+			//
+			WinUHidCompleteReadEvent(Device, event, Report, ReportSize);
+
+			//
+			// Rearm the throttling timer now that we've sent a new input report
+			//
+			SetWaitableTimer(Device->ThrottlingTimer, &Device->ThrottlingPeriod, 0, NULL, NULL, FALSE);
+			return TRUE;
+		}
+		else {
+			//
+			// The device is not ready to accept a new input report yet
+			//
+			SetLastError(ERROR_NOT_READY);
+			return FALSE;
+		}
+	}
+
 	Wrappers::Event overlappedEvent{ CreateEventW(NULL, TRUE, FALSE, NULL) };
 	if (!overlappedEvent.IsValid()) {
 		return FALSE;
@@ -229,12 +293,74 @@ WINUHID_API BOOL WinUHidSubmitInputReport(PWINUHID_DEVICE Device, LPCVOID Report
 	return ret;
 }
 
+DWORD WINAPI ReadThreadProc(LPVOID lpParameter)
+{
+	PWINUHID_DEVICE device = (PWINUHID_DEVICE)lpParameter;
+
+	AcquireSRWLockShared(&device->Lock);
+	while (device->State == WINUHID_DEVICE_STATE::Started) {
+		ReleaseSRWLockShared(&device->Lock);
+
+		//
+		// Wait for a read report request to come in
+		//
+		WaitForSingleObject(device->ReadReportReadyEvent, INFINITE);
+
+		AcquireSRWLockShared(&device->Lock);
+		if (device->State != WINUHID_DEVICE_STATE::Started) {
+			break;
+		}
+
+		//
+		// Take the pending read report event
+		//
+		auto event = (PCWINUHID_EVENT)InterlockedExchangePointer((volatile PVOID*)&device->PendingReadReportEvent, NULL);
+		if (!event) {
+			//
+			// This should never happen
+			//
+			continue;
+		}
+
+		ReleaseSRWLockShared(&device->Lock);
+
+		//
+		// Pass the request on to the user
+		//
+		device->EventCallback(device->CallbackContext, device, event);
+
+		//
+		// Arm and wait on the throttling timer before accepting a new request
+		//
+		SetWaitableTimer(device->ThrottlingTimer, &device->ThrottlingPeriod, 0, NULL, NULL, FALSE);
+		WaitForSingleObject(device->ThrottlingTimer, INFINITE);
+
+		AcquireSRWLockShared(&device->Lock);
+	}
+	ReleaseSRWLockShared(&device->Lock);
+
+	return GetLastError();
+}
+
 DWORD WINAPI EventThreadProc(LPVOID lpParameter)
 {
 	PWINUHID_DEVICE device = (PWINUHID_DEVICE)lpParameter;
 	PCWINUHID_EVENT event;
 
 	while ((event = WinUHidPollEvent(device, INFINITE))) {
+		//
+		// If this is a ready-for-read event and throttling is enabled, pass it to the read thread
+		//
+		if (event->Type == WINUHID_EVENT_READ_REPORT && device->ThrottlingTimer && event->Read.DataLength == 0) {
+			//
+			// NB: VHF guarantees only a single outstanding ready-for-read event at a time, so we don't need
+			// to handle the case where a pending read report event is already here.
+			//
+			InterlockedExchangePointer((volatile PVOID*)&device->PendingReadReportEvent, (PVOID)event);
+			SetEvent(device->ReadReportReadyEvent);
+			continue;
+		}
+
 		device->EventCallback(device->CallbackContext, device, event);
 	}
 
@@ -286,9 +412,36 @@ WINUHID_API BOOL WinUHidStartDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLB
 		SetThreadPriority(Device->EventThread, THREAD_PRIORITY_TIME_CRITICAL);
 	}
 
+	//
+	// If read throttling is enabled, start the read thread
+	//
+	if (Device->ThrottlingTimer != NULL) {
+		Device->ReadThread = CreateThread(NULL, 0, ReadThreadProc, Device, 0, NULL);
+		if (Device->ReadThread == NULL) {
+			ReleaseSRWLockExclusive(&Device->Lock);
+			if (Device->EventThread != NULL) {
+				WaitForSingleObject(Device->EventThread, INFINITE);
+				CloseHandle(Device->EventThread);
+				Device->EventThread = NULL;
+			}
+			return FALSE;
+		}
+
+		//
+		// Raise the priority of the event thread to ensure it can quickly service
+		// pending HID requests and then go back to sleep. The scheduling latency
+		// of this thread directly determines the performance of the HID client
+		// reading this device on the other side.
+		//
+		// Additionally, if this thread is starved too long, VHF may decide that
+		// we're out to lunch and silently cancel our pending requests for us.
+		//
+		SetThreadPriority(Device->ReadThread, THREAD_PRIORITY_TIME_CRITICAL);
+	}
+
 	if (!DeviceIoControlInSync(Device->Handle, NULL, IOCTL_WINUHID_START_DEVICE, NULL, 0)) {
 		//
-		// Unwinding the event thread creation is relatively simple. We are not yet
+		// Unwinding thread creation is relatively simple. We are not yet
 		// in the Started state and we hold the device lock exclusively, so the
 		// thread will be blocking inside WinUHidPollEvent() on the lock. When we
 		// release the lock, it will observe that we're not in a valid state to poll
@@ -299,6 +452,11 @@ WINUHID_API BOOL WinUHidStartDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLB
 			WaitForSingleObject(Device->EventThread, INFINITE);
 			CloseHandle(Device->EventThread);
 			Device->EventThread = NULL;
+		}
+		if (Device->ReadThread != NULL) {
+			WaitForSingleObject(Device->ReadThread, INFINITE);
+			CloseHandle(Device->ReadThread);
+			Device->ReadThread = NULL;
 		}
 		return FALSE;
 	}
@@ -424,38 +582,8 @@ WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeo
 		}
 		else {
 			//
-			// Upon success, the event has been filled. However, if this is a read event,
-			// we will allocate additional space after the event to contain the completion data.
+			// Upon success, the event has been filled.
 			//
-			if (WINUHID_EVENT_TYPE_IS_READ(event->Type) && bufferSize < bytesWritten + FIELD_OFFSET(WINUHID_READ_EVENT_COMPLETE, Data) + event->Read.DataLength) {
-				bufferSize = bytesWritten + FIELD_OFFSET(WINUHID_READ_EVENT_COMPLETE, Data) + event->Read.DataLength;
-
-				AcquireSRWLockExclusive(&Device->Lock);
-				if (Device->EventBufferSizeHint < bufferSize) {
-					Device->EventBufferSizeHint = bufferSize;
-				}
-				ReleaseSRWLockExclusive(&Device->Lock);
-
-				newEvent = (PWINUHID_EVENT)HeapReAlloc(GetProcessHeap(), 0, event, bufferSize);
-				if (newEvent == NULL) {
-					//
-					// Okay, this is fun. We have an event but can't allocate enough memory to return it.
-					// We'll need to complete it here inline to avoid leaking the request.
-					//
-					WINUHID_READ_EVENT_COMPLETE readComplete;
-					readComplete.RequestId = event->RequestId;
-					readComplete.Status = STATUS_NO_MEMORY;
-					readComplete.DataLength = 0;
-					DeviceIoControlInSync(Device->Handle, overlappedEvent.Get(), IOCTL_WINUHID_COMPLETE_READ_EVENT, &readComplete, sizeof(readComplete));
-
-					SetLastError(ERROR_OUTOFMEMORY);
-					goto Fail;
-				}
-				else {
-					event = newEvent;
-				}
-			}
-
 			return event;
 		}
 	}
@@ -478,37 +606,40 @@ WINUHID_API VOID WinUHidCompleteWriteEvent(PWINUHID_DEVICE Device, PCWINUHID_EVE
 
 WINUHID_API VOID WinUHidCompleteReadEvent(PWINUHID_DEVICE Device, PCWINUHID_EVENT Event, LPCVOID Data, DWORD DataLength)
 {
-	PWINUHID_READ_EVENT_COMPLETE eventComplete;
+	auto eventComplete = (PWINUHID_READ_EVENT_COMPLETE)HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(WINUHID_READ_EVENT_COMPLETE, Data) + DataLength);
+	if (eventComplete) {
+		eventComplete->RequestId = Event->RequestId;
 
-	//
-	// To avoid having to allocate memory here (which could fail), we allocate extra memory in
-	// WinUHidPollEvent() for the WINUHID_READ_EVENT_COMPLETE at the end of the WINUHID_EVENT.
-	//
-	eventComplete = (PWINUHID_READ_EVENT_COMPLETE)(Event + 1);
+		if (Data != NULL) {
+			eventComplete->Status = STATUS_SUCCESS;
 
-	eventComplete->RequestId = Event->RequestId;
+			//
+			// If additional data is provided, truncate to the requested buffer size.
+			//
+			if (Event->Read.DataLength != 0 && DataLength > Event->Read.DataLength) {
+				eventComplete->DataLength = Event->Read.DataLength;
+			}
+			else {
+				eventComplete->DataLength = DataLength;
+			}
 
-	if (Data != NULL) {
-		eventComplete->Status = STATUS_SUCCESS;
-
-		//
-		// If additional data is provided, truncate to the requested buffer size.
-		//
-		if (DataLength > Event->Read.DataLength) {
-			eventComplete->DataLength = Event->Read.DataLength;
+			RtlCopyMemory(&eventComplete->Data[0], Data, eventComplete->DataLength);
 		}
 		else {
-			eventComplete->DataLength = DataLength;
+			eventComplete->Status = STATUS_UNSUCCESSFUL;
+			eventComplete->DataLength = 0;
 		}
 
-		RtlCopyMemory(&eventComplete->Data[0], Data, eventComplete->DataLength);
+		DeviceIoControlInSync(Device->Handle, NULL, IOCTL_WINUHID_COMPLETE_READ_EVENT, eventComplete, FIELD_OFFSET(WINUHID_READ_EVENT_COMPLETE, Data) + eventComplete->DataLength);
+		HeapFree(GetProcessHeap(), 0, eventComplete);
 	}
 	else {
-		eventComplete->Status = STATUS_UNSUCCESSFUL;
-		eventComplete->DataLength = 0;
+		WINUHID_READ_EVENT_COMPLETE readComplete;
+		readComplete.RequestId = Event->RequestId;
+		readComplete.Status = STATUS_NO_MEMORY;
+		readComplete.DataLength = 0;
+		DeviceIoControlInSync(Device->Handle, NULL, IOCTL_WINUHID_COMPLETE_READ_EVENT, &readComplete, sizeof(readComplete));
 	}
-
-	DeviceIoControlInSync(Device->Handle, NULL, IOCTL_WINUHID_COMPLETE_READ_EVENT, eventComplete, FIELD_OFFSET(WINUHID_READ_EVENT_COMPLETE, Data) + eventComplete->DataLength);
 
 	HeapFree(GetProcessHeap(), 0, const_cast<PWINUHID_EVENT>(Event));
 }
@@ -557,6 +688,32 @@ WINUHID_API VOID WinUHidStopDevice(PWINUHID_DEVICE Device)
 			CloseHandle(Device->EventThread);
 			Device->EventThread = NULL;
 		}
+
+		//
+		// If we have a read thread, wait for it to exit now
+		//
+		if (Device->ReadThread != NULL) {
+			LARGE_INTEGER dueTime;
+
+			ReleaseSRWLockExclusive(&Device->Lock);
+
+			//
+			// Signal both the event and the throttling timer. The thread could be waiting on either.
+			//
+			SetEvent(Device->ReadReportReadyEvent);
+			dueTime.QuadPart = 0;
+			SetWaitableTimer(Device->ThrottlingTimer, &dueTime, 0, NULL, NULL, FALSE);
+
+			WaitForSingleObject(Device->ReadThread, INFINITE);
+
+			AcquireSRWLockExclusive(&Device->Lock);
+
+			//
+			// Finish cleaning up read thread state
+			//
+			CloseHandle(Device->ReadThread);
+			Device->ReadThread = NULL;
+		}
 	}
 
 	ReleaseSRWLockExclusive(&Device->Lock);
@@ -574,6 +731,18 @@ WINUHID_API VOID WinUHidDestroyDevice(PWINUHID_DEVICE Device)
 	//
 	if (Device->State == WINUHID_DEVICE_STATE::Started) {
 		WinUHidStopDevice(Device);
+	}
+
+	if (Device->ThrottlingTimer != NULL) {
+		CloseHandle(Device->ThrottlingTimer);
+	}
+
+	if (Device->ReadReportReadyEvent != NULL) {
+		CloseHandle(Device->ReadReportReadyEvent);
+	}
+
+	if (Device->PendingReadReportEvent != NULL) {
+		WinUHidCompleteReadEvent(Device, Device->PendingReadReportEvent, NULL, 0);
 	}
 
 	if (Device->Handle != NULL && Device->Handle != INVALID_HANDLE_VALUE) {

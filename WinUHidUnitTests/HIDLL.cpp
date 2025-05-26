@@ -74,6 +74,172 @@ TEST(HIDLL, InputReport) {
 	WinUHidDestroyDevice(device);
 }
 
+TEST(HIDLL, InputReportOnDemand) {
+	static const UCHAR reportDescriptor[] =
+	{
+		0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
+		0x09, 0x05,        // Usage (Game Pad)
+		0xA1, 0x01,        // Collection (Application)
+		0x09, 0x30,        //   Usage (X)
+		0x09, 0x31,        //   Usage (Y)
+		0x09, 0x32,        //   Usage (Z)
+		0x09, 0x35,        //   Usage (Rz)
+		0x15, 0x00,        //   Logical Minimum (0)
+		0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+		0x75, 0x08,        //   Report Size (8)
+		0x95, 0x04,        //   Report Count (4)
+		0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+		0xC0,              // End Collection
+	};
+
+	WINUHID_DEVICE_CONFIG config =
+	{
+		WINUHID_EVENT_READ_REPORT,
+		0x1234,
+		0x5678,
+		0,
+		sizeof(reportDescriptor),
+		reportDescriptor,
+		{},
+		NULL,
+		NULL,
+		0
+	};
+
+	PWINUHID_DEVICE device = WinUHidCreateDevice(&config);
+	ASSERT_NE(device, nullptr);
+
+	static UCHAR seq = 0;
+
+	EXPECT_TRUE(WinUHidStartDevice(device, [](PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHID_EVENT Event) {
+		EXPECT_EQ(Event->Type, WINUHID_EVENT_READ_REPORT);
+		EXPECT_EQ(Event->ReportId, 0);
+
+		UCHAR data[]{ seq, 2, 3, 4 };
+		WinUHidCompleteReadEvent(Device, Event, data, sizeof(data));
+	}, NULL));
+
+	SDLHIDManager hm;
+	SDL_hid_device* hid = hm.OpenDevice(config.VendorID, config.ProductID);
+	ASSERT_NE(device, nullptr);
+
+	UCHAR expectedData[]{ 0, 2, 3, 4 };
+	UCHAR actualData[10];
+
+	//
+	// Set the sequence number and read off any pending reports
+	//
+	seq = 1;
+	Sleep(100);
+	while (SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 0) > 0);
+
+	//
+	// We should see the input report from our HID client (and no extra data)
+	//
+	EXPECT_EQ(SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 100), 4);
+
+	//
+	// The report should be identical to what we sent
+	//
+	expectedData[0] = 1;
+	EXPECT_TRUE(RtlEqualMemory(actualData, expectedData, sizeof(expectedData)));
+
+	//
+	// Set the sequence number again and read off any pending reports
+	//
+	seq = 2;
+	Sleep(100);
+	while (SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 0) > 0);
+
+	//
+	// We should see the next input report from our HID client (and no extra data)
+	//
+	EXPECT_EQ(SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 100), 4);
+
+	//
+	// The report should be identical to what we sent
+	//
+	expectedData[0] = 2;
+	EXPECT_TRUE(RtlEqualMemory(actualData, expectedData, sizeof(expectedData)));
+
+	SDL_hid_close(hid);
+	WinUHidDestroyDevice(device);
+}
+
+TEST(HIDLL, InputReportOnDemandThrottled) {
+	static const UCHAR reportDescriptor[] =
+	{
+		0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
+		0x09, 0x05,        // Usage (Game Pad)
+		0xA1, 0x01,        // Collection (Application)
+		0x09, 0x30,        //   Usage (X)
+		0x09, 0x31,        //   Usage (Y)
+		0x09, 0x32,        //   Usage (Z)
+		0x09, 0x35,        //   Usage (Rz)
+		0x15, 0x00,        //   Logical Minimum (0)
+		0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+		0x75, 0x08,        //   Report Size (8)
+		0x95, 0x04,        //   Report Count (4)
+		0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+		0xC0,              // End Collection
+	};
+
+	WINUHID_DEVICE_CONFIG config =
+	{
+		WINUHID_EVENT_READ_REPORT,
+		0x1234,
+		0x5678,
+		0,
+		sizeof(reportDescriptor),
+		reportDescriptor,
+		{},
+		NULL,
+		NULL,
+		10000000, // 10 second throttling period
+	};
+
+	PWINUHID_DEVICE device = WinUHidCreateDevice(&config);
+	ASSERT_NE(device, nullptr);
+
+	EXPECT_TRUE(WinUHidStartDevice(device, [](PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHID_EVENT Event) {
+		EXPECT_EQ(Event->Type, WINUHID_EVENT_READ_REPORT);
+		EXPECT_EQ(Event->ReportId, 0);
+
+		UCHAR data[]{ 1, 2, 3, 4 };
+		WinUHidCompleteReadEvent(Device, Event, data, sizeof(data));
+	}, NULL));
+
+	SDLHIDManager hm;
+	SDL_hid_device* hid = hm.OpenDevice(config.VendorID, config.ProductID);
+	ASSERT_NE(device, nullptr);
+
+	UCHAR expectedData[]{ 1, 2, 3, 4 };
+	UCHAR actualData[10];
+
+	//
+	// Read off any pending input reports
+	//
+	while (SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 0) > 0);
+
+	//
+	// There should be no input reports readable yet
+	//
+	EXPECT_EQ(SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 1000), 0);
+
+	//
+	// If wait 10 seconds, we should get one
+	//
+	EXPECT_EQ(SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 10000), 4);
+
+	//
+	// The report should be identical to what we sent
+	//
+	EXPECT_TRUE(RtlEqualMemory(actualData, expectedData, sizeof(expectedData)));
+
+	SDL_hid_close(hid);
+	WinUHidDestroyDevice(device);
+}
+
 TEST(HIDLL, NumberedInputReport) {
 	static const UCHAR reportDescriptorNumbered[] =
 	{
@@ -137,6 +303,99 @@ TEST(HIDLL, NumberedInputReport) {
 	//
 	// The report should be identical to what we sent
 	//
+	EXPECT_TRUE(RtlEqualMemory(actualData, expectedData, sizeof(expectedData)));
+
+	SDL_hid_close(hid);
+	WinUHidDestroyDevice(device);
+}
+
+TEST(HIDLL, NumberedInputReportOnDemand) {
+	static const UCHAR reportDescriptorNumbered[] =
+	{
+		0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
+		0x09, 0x05,        // Usage (Game Pad)
+		0xA1, 0x01,        // Collection (Application)
+		0x85, 0x01,        //   Report ID (1)
+		0x09, 0x30,        //   Usage (X)
+		0x09, 0x31,        //   Usage (Y)
+		0x09, 0x32,        //   Usage (Z)
+		0x09, 0x35,        //   Usage (Rz)
+		0x15, 0x00,        //   Logical Minimum (0)
+		0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+		0x75, 0x08,        //   Report Size (8)
+		0x95, 0x04,        //   Report Count (4)
+		0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+		0xC0,              // End Collection
+	};
+
+	WINUHID_DEVICE_CONFIG config =
+	{
+		WINUHID_EVENT_READ_REPORT,
+		0x1234,
+		0x5678,
+		0,
+		sizeof(reportDescriptorNumbered),
+		reportDescriptorNumbered,
+		{},
+		NULL,
+		NULL,
+		0
+	};
+
+	PWINUHID_DEVICE device = WinUHidCreateDevice(&config);
+	ASSERT_NE(device, nullptr);
+
+	static UCHAR seq = 0;
+
+	EXPECT_TRUE(WinUHidStartDevice(device, [](PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHID_EVENT Event) {
+		EXPECT_EQ(Event->Type, WINUHID_EVENT_READ_REPORT);
+		EXPECT_EQ(Event->ReportId, 0);
+
+		UCHAR data[]{ 1, seq, 2, 3, 4 };
+		WinUHidCompleteReadEvent(Device, Event, data, sizeof(data));
+	}, NULL));
+
+	SDLHIDManager hm;
+	SDL_hid_device* hid = hm.OpenDevice(config.VendorID, config.ProductID);
+	ASSERT_NE(device, nullptr);
+
+	UCHAR expectedData[]{ 1, 0, 2, 3, 4 };
+	UCHAR actualData[10];
+
+	//
+	// Set the sequence number and read off any pending reports
+	//
+	seq = 1;
+	Sleep(100);
+	while (SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 0) > 0);
+
+	//
+	// We should see the input report from our HID client (and no extra data)
+	//
+	EXPECT_EQ(SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 100), 5);
+
+	//
+	// The report should be identical to what we sent
+	//
+	expectedData[1] = 1;
+	EXPECT_TRUE(RtlEqualMemory(actualData, expectedData, sizeof(expectedData)));
+
+	//
+	// Set the sequence number again and read off any pending reports
+	//
+	seq = 2;
+	Sleep(100);
+	while (SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 0) > 0);
+
+	//
+	// We should see the next input report from our HID client (and no extra data)
+	//
+	EXPECT_EQ(SDL_hid_read_timeout(hid, actualData, sizeof(actualData), 100), 5);
+
+	//
+	// The report should be identical to what we sent
+	//
+	expectedData[1] = 2;
 	EXPECT_TRUE(RtlEqualMemory(actualData, expectedData, sizeof(expectedData)));
 
 	SDL_hid_close(hid);
