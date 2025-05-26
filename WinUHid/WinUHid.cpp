@@ -368,7 +368,7 @@ WINUHID_API PCWINUHID_EVENT WinUHidPollEvent(PWINUHID_DEVICE Device, DWORD Timeo
 			// Wait for the IOCTL to complete or the timeout to expire
 			//
 			ret = GetOverlappedResultEx(Device->Handle, &overlapped, &bytesWritten, TimeoutMillis, FALSE);
-			if (!ret && GetLastError() == WAIT_TIMEOUT) {
+			if (!ret && (GetLastError() == WAIT_TIMEOUT || GetLastError() == ERROR_IO_INCOMPLETE)) {
 				//
 				// If the timeout expired, we need to cancel the pending I/O and wait for completion.
 				//
