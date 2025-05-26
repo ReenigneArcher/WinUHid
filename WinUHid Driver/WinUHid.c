@@ -849,11 +849,6 @@ WinUHidEvtIoDeviceControl(
         }
 
         //
-        // The report ID must always be the first byte of the report
-        //
-        opContext->HidTransferPacket.reportBuffer[0] = opContext->HidTransferPacket.reportId;
-
-        //
         // Complete and delete the request
         //
         status = VhfAsyncOperationComplete(opContext->Handle, readComplete->Status);

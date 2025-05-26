@@ -83,7 +83,9 @@ typedef struct _WINUHID_EVENT {
 	//
 	// For output events (SET/WRITE), the raw data that should be sent to the
 	// virtual device is included directly in the event. When the operation is
-	// completed, you must invoke WinUHidCompleteWriteEvent().
+	// completed, you must invoke WinUHidCompleteWriteEvent(). If the device
+	// uses numbered reports, the first byte of the data buffer will contain
+	// the report ID.
 	//
 	// For input events (GET/READ), the caller must provide the read data by
 	// calling WinUHidCompleteReadEvent(). For some READ events, the data
@@ -139,8 +141,8 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config);
 //
 // Submits an input report to the device. This can be called before WinUHidStartDevice().
 //
-// Note: The provided report must be exactly the expected length based on the report descriptor
-// and must have one prefix byte specifying the Report ID (set to 0 if not using Report IDs).
+// Note: The provided report must be exactly the expected length based on the report descriptor.
+// If the device uses numbered reports, the report ID byte must be prepended to the report data.
 //
 // If you have enabled WINUHID_EVENT_READ_REPORT, this function may return FALSE and GetLastError()
 // will return ERROR_NOT_READY if the device is not yet ready to receive your input report yet.
@@ -217,6 +219,8 @@ WINUHID_API VOID WinUHidCompleteWriteEvent(PWINUHID_DEVICE Device, PCWINUHID_EVE
 // - If DataLength > Read.DataLength, the completed buffer will be truncated to Read.DataLength bytes.
 //
 // If WINUHID_EVENT.Read.DataLength and ReportId was 0, you may provide any valid input report.
+//
+// If the device uses numbered reports, the first byte of the data buffer must be the report ID.
 //
 // NOTE: The Microsoft VHF.sys driver maintains an internal timeout for asynchronous requests
 // and may silently cancel your pending requests if you take too long to complete them. To avoid
