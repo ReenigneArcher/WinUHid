@@ -246,7 +246,7 @@ const BYTE k_PS4ReportDescriptor[] =
 
 const WINUHID_DEVICE_CONFIG k_PS4Config =
 {
-	(WINUHID_EVENT_TYPE)(WINUHID_EVENT_WRITE_REPORT | WINUHID_EVENT_GET_FEATURE | WINUHID_EVENT_SET_FEATURE),
+	(WINUHID_EVENT_TYPE)(WINUHID_EVENT_READ_REPORT | WINUHID_EVENT_WRITE_REPORT | WINUHID_EVENT_GET_FEATURE | WINUHID_EVENT_SET_FEATURE),
 	0x054c, // Sony
 	0x05c4, // DualShock 4
 	0,
@@ -254,7 +254,8 @@ const WINUHID_DEVICE_CONFIG k_PS4Config =
 	k_PS4ReportDescriptor,
 	{},
 	NULL,
-	NULL
+	NULL,
+	100000, // 100 ms input resend interval to prevent sensor timestamp overflow
 };
 
 #include <pshpack1.h>
@@ -302,9 +303,10 @@ typedef struct _WINUHID_PS4_GAMEPAD {
 	HANDLE LedUpdatedEvent;
 	PS4_LED_STATE LedState;
 
-	HANDLE InputThread;
-	HANDLE InputUpdatedEvent;
+	LARGE_INTEGER QpcFrequency;
+	LARGE_INTEGER LastInputReportTime;
 	WINUHID_PS4_INPUT_REPORT LastInputReport;
+	USHORT Timestamp;
 
 	UCHAR MacAddress[6];
 } WINUHID_PS4_GAMEPAD, *PWINUHID_PS4_GAMEPAD;
@@ -315,10 +317,30 @@ typedef struct _WINUHID_PS4_GAMEPAD {
 
 #define DS4_OUTPUT_REPORT_EFFECTS           0x05
 
+void PrepareInputReportForSubmission(PWINUHID_PS4_GAMEPAD Gamepad)
+{
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+
+	//
+	// Compute the time between reports to determine the timestamp increment
+	//
+	LARGE_INTEGER deltaNs;
+	deltaNs.QuadPart = now.QuadPart - Gamepad->LastInputReportTime.QuadPart;
+	deltaNs.QuadPart *= 1000000000ULL;
+	deltaNs.QuadPart /= Gamepad->QpcFrequency.QuadPart;
+	Gamepad->Timestamp += (USHORT)(deltaNs.QuadPart / 5333); // Timestamp is in 5.333us units
+	Gamepad->LastInputReportTime = now;
+
+	//
+	// Send the input report with the updated timestamp
+	//
+	Gamepad->LastInputReport.Timestamp = Gamepad->Timestamp;
+}
+
 VOID WinUHidPS4Callback(PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHID_EVENT Event)
 {
 	auto gamepad = (PWINUHID_PS4_GAMEPAD)CallbackContext;
-
 
 	if (Event->Type == WINUHID_EVENT_GET_FEATURE) {
 		//
@@ -406,6 +428,15 @@ VOID WinUHidPS4Callback(PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHID
 		// Just succeed all set feature events
 		//
 		WinUHidCompleteWriteEvent(Device, Event, TRUE);
+	}
+	else if (Event->Type == WINUHID_EVENT_READ_REPORT) {
+		//
+		// Resubmit the latest input report with updated timestamps
+		//
+		AcquireSRWLockExclusive(&gamepad->Lock);
+		PrepareInputReportForSubmission(gamepad);
+		ReleaseSRWLockExclusive(&gamepad->Lock);
+		WinUHidCompleteReadEvent(Device, Event, &gamepad->LastInputReport, sizeof(gamepad->LastInputReport));
 	}
 	else {
 		//
@@ -511,72 +542,6 @@ DWORD WINAPI LedThreadProc(LPVOID lpParameter)
 	return GetLastError();
 }
 
-//
-// This thread sends input reports every 100 ms to avoid the 16-bit
-// timestamp value in the input report wrapping around.
-//
-DWORD WINAPI InputThreadProc(LPVOID lpParameter)
-{
-	auto device = (PWINUHID_PS4_GAMEPAD)lpParameter;
-	LARGE_INTEGER frequency;
-	LARGE_INTEGER lastReportTime;
-	USHORT timestamp;
-
-	//
-	// Increase thread priority since starvation of this thread
-	// may cause unexpected application behavior due to the
-	// timestamp field wrapping around.
-	//
-	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-
-	//
-	// Get QPC frequency and initial start value
-	//
-	if (!QueryPerformanceFrequency(&frequency)) {
-		return GetLastError();
-	}
-	QueryPerformanceCounter(&lastReportTime);
-	timestamp = 0;
-
-	while (!device->Stopping) {
-		LARGE_INTEGER now;
-
-		WaitForSingleObject(device->InputUpdatedEvent, 100);
-		if (device->Stopping) {
-			break;
-		}
-
-		//
-		// Fetch the latest input report and the current time
-		//
-		AcquireSRWLockShared(&device->Lock);
-		WINUHID_PS4_INPUT_REPORT inputReport = device->LastInputReport;
-		QueryPerformanceCounter(&now);
-		ResetEvent(device->InputUpdatedEvent);
-		ReleaseSRWLockShared(&device->Lock);
-
-		//
-		// Compute the time between reports to determine the timestamp increment
-		//
-		LARGE_INTEGER deltaNs;
-		deltaNs.QuadPart = now.QuadPart - lastReportTime.QuadPart;
-		deltaNs.QuadPart *= 1000000000ULL;
-		deltaNs.QuadPart /= frequency.QuadPart;
-		timestamp += (USHORT)(deltaNs.QuadPart / 5333); // Timestamp is in 5.333us units
-		lastReportTime = now;
-
-		//
-		// Send the input report with the updated timestamp
-		//
-		inputReport.Timestamp = timestamp;
-		if (!WinUHidSubmitInputReport(device->Device, &inputReport, sizeof(inputReport))) {
-			break;
-		}
-	}
-
-	return GetLastError();
-}
-
 WINUHID_API PWINUHID_PS4_GAMEPAD WinUHidPS4Create(PCWINUHID_PS4_GAMEPAD_INFO Info, PWINUHID_PS4_FF_CB RumbleCallback, PWINUHID_PS4_LED_CB LedCallback, PVOID CallbackContext)
 {
 	WINUHID_DEVICE_CONFIG config = k_PS4Config;
@@ -593,6 +558,9 @@ WINUHID_API PWINUHID_PS4_GAMEPAD WinUHidPS4Create(PCWINUHID_PS4_GAMEPAD_INFO Inf
 		return NULL;
 	}
 
+	QueryPerformanceFrequency(&gamepad->QpcFrequency);
+	QueryPerformanceCounter(&gamepad->LastInputReportTime);
+
 	InitializeSRWLock(&gamepad->Lock);
 	gamepad->RumbleCallback = RumbleCallback;
 	gamepad->LedCallback = LedCallback;
@@ -603,22 +571,6 @@ WINUHID_API PWINUHID_PS4_GAMEPAD WinUHidPS4Create(PCWINUHID_PS4_GAMEPAD_INFO Inf
 	}
 
 	WinUHidPS4InitializeInputReport(&gamepad->LastInputReport);
-
-	gamepad->InputUpdatedEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-	if (!gamepad->InputUpdatedEvent) {
-		WinUHidPS4Destroy(gamepad);
-		return NULL;
-	}
-
-	//
-	// Start the input send thread which handles sending and
-	// resending input reports to avoid timestamp overflows
-	//
-	gamepad->InputThread = CreateThread(NULL, 0, InputThreadProc, gamepad, 0, NULL);
-	if (!gamepad->InputThread) {
-		WinUHidPS4Destroy(gamepad);
-		return NULL;
-	}
 
 	//
 	// If the caller wants LED callbacks, start the LED thread
@@ -663,28 +615,19 @@ WINUHID_API PWINUHID_PS4_GAMEPAD WinUHidPS4Create(PCWINUHID_PS4_GAMEPAD_INFO Inf
 
 WINUHID_API BOOL WinUHidPS4ReportInput(PWINUHID_PS4_GAMEPAD Gamepad, PCWINUHID_PS4_INPUT_REPORT Report)
 {
-	//
-	// Make sure the input send thread is still healthy. If it encountered an error,
-	// we will propagate it to the caller here.
-	//
-	DWORD exitCode;
-	if (!GetExitCodeThread(Gamepad->InputThread, &exitCode)) {
-		return FALSE;
-	}
-	else if (exitCode != STILL_ACTIVE) {
-		SetLastError(exitCode);
-		return FALSE;
-	}
-
-	//
-	// Pass the input report off to the input thread to send
-	//
 	AcquireSRWLockExclusive(&Gamepad->Lock);
 	Gamepad->LastInputReport = *Report;
+	PrepareInputReportForSubmission(Gamepad);
 	ReleaseSRWLockExclusive(&Gamepad->Lock);
-	SetEvent(Gamepad->InputUpdatedEvent);
 
-	return TRUE;
+	BOOL ret = WinUHidSubmitInputReport(Gamepad->Device, &Gamepad->LastInputReport, sizeof(Gamepad->LastInputReport));
+
+	//
+	// Since we handle WINUHID_EVENT_READ_REPORT, WinUHidSubmitInputReport may fail with ERROR_NOT_READY
+	// if a HID client hasn't asked for another report. This is fine because our callback function will
+	// report this input once the caller is ready for it.
+	//
+	return ret || GetLastError() == ERROR_NOT_READY;
 }
 
 WINUHID_API VOID WinUHidPS4InitializeInputReport(PWINUHID_PS4_INPUT_REPORT Report)
@@ -806,16 +749,6 @@ WINUHID_API VOID WinUHidPS4Destroy(PWINUHID_PS4_GAMEPAD Gamepad)
 		SetEvent(Gamepad->LedUpdatedEvent);
 		WaitForSingleObject(Gamepad->LedThread, INFINITE);
 		CloseHandle(Gamepad->LedThread);
-	}
-
-	if (Gamepad->InputThread) {
-		SetEvent(Gamepad->InputUpdatedEvent);
-		WaitForSingleObject(Gamepad->InputThread, INFINITE);
-		CloseHandle(Gamepad->InputThread);
-	}
-
-	if (Gamepad->InputUpdatedEvent) {
-		CloseHandle(Gamepad->InputUpdatedEvent);
 	}
 
 	if (Gamepad->LedUpdatedEvent) {
