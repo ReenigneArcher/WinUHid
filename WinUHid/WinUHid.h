@@ -16,12 +16,13 @@
 
 typedef enum _WINUHID_EVENT_TYPE {
 	WINUHID_EVENT_NONE = 0x0,
-    WINUHID_EVENT_GET_FEATURE = 0x1,
-    WINUHID_EVENT_SET_FEATURE = 0x2,
-    WINUHID_EVENT_WRITE_REPORT = 0x4,
+	WINUHID_EVENT_GET_FEATURE = 0x1,
+	WINUHID_EVENT_SET_FEATURE = 0x2,
+	WINUHID_EVENT_WRITE_REPORT = 0x4,
+	WINUHID_EVENT_READ_REPORT = 0x8,
 } WINUHID_EVENT_TYPE, *PWINUHID_EVENT_TYPE;
 
-#define WINUHID_EVENT_TYPE_IS_READ(x) ((x) == WINUHID_EVENT_GET_FEATURE)
+#define WINUHID_EVENT_TYPE_IS_READ(x) ((x) == WINUHID_EVENT_GET_FEATURE || (x) == WINUHID_EVENT_READ_REPORT)
 #define WINUHID_EVENT_TYPE_IS_WRITE(x) ((x) == WINUHID_EVENT_SET_FEATURE || (x) == WINUHID_EVENT_WRITE_REPORT)
 
 #include <pshpack1.h>
@@ -59,6 +60,20 @@ typedef struct _WINUHID_DEVICE_CONFIG {
 	// Note: This value must be a REG_MULTI_SZ - that is, a set of null terminated strings terminated by a second consecutive null.
 	//
 	PCWSTR HardwareIDs;
+
+	//
+	// When WINUHID_EVENT_READ_REPORT is specified, this value throttles the rate
+	// at which WINUHID_EVENT_READ_REPORT events are returned to the caller when
+	// operating in callback mode. If set to 0, throttling is disabled.
+	//
+	// WARNING: Throttling read reports is very important to avoid causing applications
+	// to enter a tight loop reading input from your device. Even if you don't use
+	// WinUHid's throttling (or you use WinUHidPollEvent() directly), you must implement
+	// some delay between input reports to avoid input devices being perpetually readable.
+	//
+	// The value is specified in microseconds.
+	//
+	UINT ReadReportPeriodUs;
 } WINUHID_DEVICE_CONFIG, *PWINUHID_DEVICE_CONFIG;
 typedef CONST WINUHID_DEVICE_CONFIG *PCWINUHID_DEVICE_CONFIG;
 
@@ -71,7 +86,9 @@ typedef struct _WINUHID_EVENT {
 	// completed, you must invoke WinUHidCompleteWriteEvent().
 	//
 	// For input events (GET/READ), the caller must provide the read data by
-	// calling WinUHidCompleteReadEvent().
+	// calling WinUHidCompleteReadEvent(). For some READ events, the data
+	// length and report ID will be 0. This indicates that you may complete
+	// the request with any valid input report for the device.
 	//
 	WINUHID_EVENT_TYPE Type;
 
@@ -125,6 +142,12 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config);
 // Note: The provided report must be exactly the expected length based on the report descriptor
 // and must have one prefix byte specifying the Report ID (set to 0 if not using Report IDs).
 //
+// If you have enabled WINUHID_EVENT_READ_REPORT, this function may return FALSE and GetLastError()
+// will return ERROR_NOT_READY if the device is not yet ready to receive your input report yet.
+// In that case, you should wait until you receive WINUHID_EVENT_READ_REPORT then submit this report
+// to WinUHidCompleteReadEvent().
+//
+//
 // On failure, the function will return FALSE. Call GetLastError() to the error code.
 //
 WINUHID_API BOOL WinUHidSubmitInputReport(PWINUHID_DEVICE Device, LPCVOID Report, DWORD ReportSize);
@@ -162,6 +185,11 @@ WINUHID_API BOOL WinUHidStartDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLB
 // you must use WinUHidStopDevice() and wait for all calls to return before calling
 // WinUHidDestroyDevice().
 //
+// If you specified WINUHID_EVENT_READ_REPORT when creating the device, it is strongly recommended
+// that you use event callbacks which will allow you to throttle the rate that these events are
+// delivered to your callback. If you don't, you must implement your own throttling to prevent
+// input devices from being perpetually readable to avoid causing problems in other HID clients.
+//
 // This function must not be invoked if an event callback was registered in WinUHidStartDevice().
 //
 // If no event is available before the timeout expires, the function will return NULL.
@@ -187,6 +215,8 @@ WINUHID_API VOID WinUHidCompleteWriteEvent(PWINUHID_DEVICE Device, PCWINUHID_EVE
 // If DataLength is not equal to WINUHID_EVENT.Read.DataLength:
 // - If DataLength < Read.DataLength, the completed buffer will be padded with zero bytes.
 // - If DataLength > Read.DataLength, the completed buffer will be truncated to Read.DataLength bytes.
+//
+// If WINUHID_EVENT.Read.DataLength and ReportId was 0, you may provide any valid input report.
 //
 // NOTE: The Microsoft VHF.sys driver maintains an internal timeout for asynchronous requests
 // and may silently cancel your pending requests if you take too long to complete them. To avoid

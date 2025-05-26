@@ -172,8 +172,8 @@ Exit:
 VOID
 DispatchAsyncOperation(
     _In_ PVOID VhfClientContext,
-    _In_ VHFOPERATIONHANDLE VhfOperationHandle,
-    _In_ PHID_XFER_PACKET HidTransferPacket,
+    _In_opt_ VHFOPERATIONHANDLE VhfOperationHandle,
+    _In_opt_ PHID_XFER_PACKET HidTransferPacket,
     _In_ WINUHID_EVENT_TYPE EventType)
 {
     PFILE_CONTEXT fileContext = VhfClientContext;
@@ -195,16 +195,30 @@ DispatchAsyncOperation(
             TRACE_EVENT,
             "Failed to create operation object: %!STATUS!",
             status);
-        status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_UNSUCCESSFUL);
-        WDFVERIFY(NT_SUCCESS(status));
+        if (VhfOperationHandle) {
+            status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_UNSUCCESSFUL);
+            WDFVERIFY(NT_SUCCESS(status));
+        }
         return;
     }
 
     opContext = OpGetContext(asyncOp);
     opContext->Type = EventType;
-    opContext->RequestId = InterlockedIncrement(&fileContext->NextRequestId);
-    opContext->Handle = VhfOperationHandle;
-    opContext->HidTransferPacket = *HidTransferPacket;
+
+    if (!HidTransferPacket) {
+        //
+        // This is a ready-for-read pseudo-request with a fixed ID
+        //
+        opContext->RequestId = 0;
+    }
+    else {
+        //
+        // Always set the MSB for real requests to avoid matching a pseudo-request ID
+        //
+        opContext->RequestId = InterlockedIncrement(&fileContext->NextRequestId) | 0x80000000;
+        opContext->Handle = VhfOperationHandle;
+        opContext->HidTransferPacket = *HidTransferPacket;
+    }
 
     //
     // Lock the request collection for queuing
@@ -219,8 +233,10 @@ DispatchAsyncOperation(
             TRACE_EVENT,
             "Received operation callback during teardown");
         WdfWaitLockRelease(fileContext->RequestLock);
-        status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_TOO_LATE);
-        WDFVERIFY(NT_SUCCESS(status));
+        if (VhfOperationHandle) {
+            status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_TOO_LATE);
+            WDFVERIFY(NT_SUCCESS(status));
+        }
         WdfObjectDelete(asyncOp);
         return;
     }
@@ -236,8 +252,10 @@ DispatchAsyncOperation(
             TRACE_EVENT,
             "Failed to add operation to waiting requests: %!STATUS!",
             status);
-        status = VhfAsyncOperationComplete(VhfOperationHandle, status);
-        WDFVERIFY(NT_SUCCESS(status));
+        if (VhfOperationHandle) {
+            status = VhfAsyncOperationComplete(VhfOperationHandle, status);
+            WDFVERIFY(NT_SUCCESS(status));
+        }
         WdfObjectDelete(asyncOp);
         return;
     }
@@ -309,6 +327,34 @@ WinUHidEvtVhfAsyncOperationWriteReport(
     DispatchAsyncOperation(VhfClientContext, VhfOperationHandle, HidTransferPacket, WINUHID_EVENT_WRITE_REPORT);
 }
 
+_Function_class_(EVT_VHF_ASYNC_OPERATION)
+VOID
+WinUHidEvtVhfAsyncOperationGetInputReport(
+    _In_ PVOID VhfClientContext,
+    _In_ VHFOPERATIONHANDLE VhfOperationHandle,
+    _In_opt_ PVOID VhfOperationContext,
+    _In_ PHID_XFER_PACKET HidTransferPacket
+)
+{
+    UNREFERENCED_PARAMETER(VhfOperationContext);
+
+    DispatchAsyncOperation(VhfClientContext, VhfOperationHandle, HidTransferPacket, WINUHID_EVENT_READ_REPORT);
+}
+
+_Function_class_(EVT_VHF_READY_FOR_NEXT_READ_REPORT)
+VOID
+WinUHidEvtVhfReadyForNextReadReport(
+    _In_ PVOID VhfClientContext
+)
+{
+    //
+    // This is a special case of WINUHID_EVENT_READ_REPORT which allows the caller to
+    // return any input report they want. We turn it their completion IOCTL into a
+    // call into VhfReadReportSubmit() to abstract away this API detail.
+    //
+    DispatchAsyncOperation(VhfClientContext, NULL, NULL, WINUHID_EVENT_READ_REPORT);
+}
+
 VOID
 WinUHidEvtIoDeviceControl(
     _In_ WDFQUEUE Queue,
@@ -374,7 +420,8 @@ WinUHidEvtIoDeviceControl(
         //
         if (info->SupportedEvents & ~(WINUHID_EVENT_GET_FEATURE |
                                       WINUHID_EVENT_SET_FEATURE |
-                                      WINUHID_EVENT_WRITE_REPORT)) {
+                                      WINUHID_EVENT_WRITE_REPORT |
+                                      WINUHID_EVENT_READ_REPORT)) {
             WdfRequestComplete(Request, STATUS_NOT_SUPPORTED);
             break;
         }
@@ -396,6 +443,10 @@ WinUHidEvtIoDeviceControl(
         }
         if (info->SupportedEvents & WINUHID_EVENT_WRITE_REPORT) {
             fileContext->VhfConfig.EvtVhfAsyncOperationWriteReport = WinUHidEvtVhfAsyncOperationWriteReport;
+        }
+        if (info->SupportedEvents & WINUHID_EVENT_READ_REPORT) {
+            fileContext->VhfConfig.EvtVhfReadyForNextReadReport = WinUHidEvtVhfReadyForNextReadReport;
+            fileContext->VhfConfig.EvtVhfAsyncOperationGetInputReport = WinUHidEvtVhfAsyncOperationGetInputReport;
         }
 
         fileContext->DeviceInfoSet = TRUE;
@@ -732,6 +783,43 @@ WinUHidEvtIoDeviceControl(
         // NB: Past this point we must always call complete and delete op!
         //
 
+        if (readComplete->RequestId == 0) {
+            //
+            // This is a pseudo-operation that just indicates that we should call
+            // VhfReadReportSubmit() with whatever the caller provided.
+            //
+            if (NT_SUCCESS(readComplete->Status) && readComplete->DataLength != 0) {
+                //
+                // The user provided data for us to complete the request now
+                //
+                HID_XFER_PACKET xferPkt;
+                xferPkt.reportId = readComplete->Data[0];
+                xferPkt.reportBuffer = readComplete->Data;
+                xferPkt.reportBufferLen = readComplete->DataLength;
+                status = VhfReadReportSubmit(fileContext->VhfHandle, &xferPkt);
+                WDFVERIFY(NT_SUCCESS(status));
+            }
+            else if (!NT_SUCCESS(readComplete->Status)) {
+                //
+                // Issue a synthetic ready-for-read callback to enqueue another
+                // event telling the user that we need another input report.
+                //
+                WinUHidEvtVhfReadyForNextReadReport(fileContext);
+                status = STATUS_SUCCESS;
+            }
+            else {
+                //
+                // A zero byte read completion means the user acknowledges the
+                // request for data and will complete it at a later time via
+                // a write IRP.
+                //
+                status = STATUS_SUCCESS;
+            }
+            WdfObjectDelete(op);
+            WdfRequestComplete(Request, status);
+            break;
+        }
+
         //
         // If the user failed the request, just complete it with an error
         //
@@ -866,7 +954,9 @@ void WinUHidEvtDeviceFileClose(
     while ((op = WdfCollectionGetFirstItem(fileContext->WaitingRequests))) {
         POPERATION_CONTEXT opContext = OpGetContext(op);
 
-        VhfAsyncOperationComplete(opContext->Handle, STATUS_CANCELLED);
+        if (opContext->RequestId != 0) {
+            VhfAsyncOperationComplete(opContext->Handle, STATUS_CANCELLED);
+        }
 
         WdfCollectionRemove(fileContext->WaitingRequests, op);
         WdfObjectDelete(op);
@@ -875,7 +965,9 @@ void WinUHidEvtDeviceFileClose(
     while ((op = WdfCollectionGetFirstItem(fileContext->OutstandingRequests))) {
         POPERATION_CONTEXT opContext = OpGetContext(op);
 
-        VhfAsyncOperationComplete(opContext->Handle, STATUS_CANCELLED);
+        if (opContext->RequestId != 0) {
+            VhfAsyncOperationComplete(opContext->Handle, STATUS_CANCELLED);
+        }
 
         WdfCollectionRemove(fileContext->OutstandingRequests, op);
         WdfObjectDelete(op);
