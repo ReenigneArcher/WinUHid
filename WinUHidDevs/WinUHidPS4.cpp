@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "WinUHidPS4.h"
 
+#include <algorithm>
+
 #include <wrl/wrappers/corewrappers.h>
 using namespace Microsoft::WRL;
 
@@ -700,6 +702,11 @@ WINUHID_API VOID WinUHidPS4InitializeInputReport(PWINUHID_PS4_INPUT_REPORT Repor
 	WinUHidPS4SetTouchState(Report, 1, FALSE, 0, 0);
 
 	WinUHidPS4SetBatteryState(Report, TRUE, 100);
+
+	//
+	// Initialize accelerometer in neutral upright position
+	//
+	WinUHidPS4SetAccelState(Report, 0, 9.80665f, 0);
 }
 
 WINUHID_API VOID WinUHidPS4SetTouchState(PWINUHID_PS4_INPUT_REPORT Report, UCHAR TouchIndex, BOOL TouchDown, USHORT TouchX, USHORT TouchY)
@@ -717,6 +724,24 @@ WINUHID_API VOID WinUHidPS4SetTouchState(PWINUHID_PS4_INPUT_REPORT Report, UCHAR
 	Report->TouchReports[0].TouchPoints[TouchIndex].YLowPart = TouchY & 0xF;
 	Report->TouchReports[0].TouchPoints[TouchIndex].YHighPart = (TouchY >> 4) & 0xFF;
 	Report->TouchReports[0].Timestamp++;
+}
+
+WINUHID_API VOID WinUHidPS4SetAccelState(PWINUHID_PS4_INPUT_REPORT Report, float AccelX, float AccelY, float AccelZ)
+{
+	static const float k_AccelSensitivity = 0.000980664976f;
+
+	Report->AccelX = std::clamp((int)(AccelX / k_AccelSensitivity), SHRT_MIN, SHRT_MAX);
+	Report->AccelY = std::clamp((int)(AccelY / k_AccelSensitivity), SHRT_MIN, SHRT_MAX);
+	Report->AccelZ = std::clamp((int)(AccelZ / k_AccelSensitivity), SHRT_MIN, SHRT_MAX);
+}
+
+WINUHID_API VOID WinUHidPS4SetGyroState(PWINUHID_PS4_INPUT_REPORT Report, float GyroX, float GyroY, float GyroZ)
+{
+	static const float k_GyroSensitivity = 0.000872664619f;
+
+	Report->GyroX = std::clamp((int)(GyroX / k_GyroSensitivity), SHRT_MIN, SHRT_MAX);
+	Report->GyroY = std::clamp((int)(GyroY / k_GyroSensitivity), SHRT_MIN, SHRT_MAX);
+	Report->GyroZ = std::clamp((int)(GyroZ / k_GyroSensitivity), SHRT_MIN, SHRT_MAX);
 }
 
 WINUHID_API VOID WinUHidPS4SetBatteryState(PWINUHID_PS4_INPUT_REPORT Report, BOOL Wired, UCHAR Percentage)

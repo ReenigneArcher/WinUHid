@@ -182,6 +182,73 @@ TEST(PS4, AxisMapping) {
 	WinUHidPS4Destroy(gamepad);
 }
 
+TEST(PS4, SensorMapping) {
+	auto gamepad = WinUHidPS4Create(NULL, NULL, NULL, NULL);
+	ASSERT_TRUE(gamepad) << "Failed to create PS4 gamepad";
+
+	SDLGamepadManager gm;
+	ASSERT_EQ(gm.GetGamepadCount(), 1) << "Unable to detect PS4 gamepad with SDL";
+
+	//
+	// Sensors must be enabled before they can be read
+	//
+	ASSERT_TRUE(SDL_SetGamepadSensorEnabled(gm.GetGamepad(0), SDL_SENSOR_GYRO, true));
+	ASSERT_TRUE(SDL_SetGamepadSensorEnabled(gm.GetGamepad(0), SDL_SENSOR_ACCEL, true));
+
+	WINUHID_PS4_INPUT_REPORT report;
+	WinUHidPS4InitializeInputReport(&report);
+
+	for (float value = -28; value <= 28; value += 0.25) {
+		WinUHidPS4SetGyroState(&report, value, 0, 0);
+		ASSERT_EQ(WinUHidPS4ReportInput(gamepad, &report), TRUE);
+
+		float expected[3] = { value, 0, 0 };
+		gm.ExpectSensorData(SDL_SENSOR_GYRO, expected);
+	}
+
+	for (float value = -28; value <= 28; value += 0.25) {
+		WinUHidPS4SetGyroState(&report, 0, value, 0);
+		ASSERT_EQ(WinUHidPS4ReportInput(gamepad, &report), TRUE);
+
+		float expected[3] = { 0, value, 0 };
+		gm.ExpectSensorData(SDL_SENSOR_GYRO, expected);
+	}
+
+	for (float value = -28; value <= 28; value += 0.25) {
+		WinUHidPS4SetGyroState(&report, 0, 0, value);
+		ASSERT_EQ(WinUHidPS4ReportInput(gamepad, &report), TRUE);
+
+		float expected[3] = { 0, 0, value };
+		gm.ExpectSensorData(SDL_SENSOR_GYRO, expected);
+	}
+
+	for (float value = -32; value <= 32; value += 0.25) {
+		WinUHidPS4SetAccelState(&report, value, 0, 0);
+		ASSERT_EQ(WinUHidPS4ReportInput(gamepad, &report), TRUE);
+
+		float expected[3] = { value, 0, 0 };
+		gm.ExpectSensorData(SDL_SENSOR_ACCEL, expected);
+	}
+
+	for (float value = -32; value <= 32; value += 0.25) {
+		WinUHidPS4SetAccelState(&report, 0, value, 0);
+		ASSERT_EQ(WinUHidPS4ReportInput(gamepad, &report), TRUE);
+
+		float expected[3] = { 0, value, 0 };
+		gm.ExpectSensorData(SDL_SENSOR_ACCEL, expected);
+	}
+
+	for (float value = -32; value <= 32; value += 0.25) {
+		WinUHidPS4SetAccelState(&report, 0, 0, value);
+		ASSERT_EQ(WinUHidPS4ReportInput(gamepad, &report), TRUE);
+
+		float expected[3] = { 0, 0, value };
+		gm.ExpectSensorData(SDL_SENSOR_ACCEL, expected);
+	}
+
+	WinUHidPS4Destroy(gamepad);
+}
+
 //
 // The touchpad is 943 points wide, but SDL treats it as 920. Since we want to
 // validate against SDL's representation, we must also use 920 as the width.

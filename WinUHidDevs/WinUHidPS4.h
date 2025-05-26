@@ -132,6 +132,20 @@ WINUHID_API VOID WinUHidPS4SetBatteryState(PWINUHID_PS4_INPUT_REPORT Report, BOO
 WINUHID_API VOID WinUHidPS4SetTouchState(PWINUHID_PS4_INPUT_REPORT Report, UCHAR TouchIndex, BOOL TouchDown, USHORT TouchX, USHORT TouchY);
 
 //
+// Sets the accelerometer state in the input report.
+//
+// The values provided should be in meters per second squared.
+//
+WINUHID_API VOID WinUHidPS4SetAccelState(PWINUHID_PS4_INPUT_REPORT Report, float AccelX, float AccelY, float AccelZ);
+
+//
+// Sets the gyroscope state in the input report.
+//
+// The values provided should be in radians per second.
+//
+WINUHID_API VOID WinUHidPS4SetGyroState(PWINUHID_PS4_INPUT_REPORT Report, float GyroX, float GyroY, float GyroZ);
+
+//
 // Submits an input report to the device.
 //
 // On failure, the function will return FALSE. Call GetLastError() to the error code.

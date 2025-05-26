@@ -145,3 +145,23 @@ void SDLGamepadManager::ExpectTouchpadFingerState(int Finger, bool Down, float T
 		EXPECT_FLOAT_EQ(actualY, TouchY) << "Finger " << Finger << " has unexpected Y coordinate";
 	}
 }
+
+void SDLGamepadManager::ExpectSensorData(SDL_SensorType sensor, float* values) {
+	for (int i = 0; i < 100; i++) {
+		float actualValues[3];
+		EXPECT_TRUE(SDL_GetGamepadSensorData(GetGamepad(0), sensor, actualValues, ARRAYSIZE(actualValues)));
+
+		if (std::fabs(actualValues[0] - values[0]) < 0.01 &&
+			std::fabs(actualValues[1] - values[1]) < 0.01 &&
+			std::fabs(actualValues[2] - values[2]) < 0.01) {
+			break;
+		}
+		SDL_Delay(1);
+	}
+
+	float actualValues[3];
+	EXPECT_TRUE(SDL_GetGamepadSensorData(GetGamepad(0), sensor, actualValues, ARRAYSIZE(actualValues)));
+	ASSERT_NEAR(actualValues[0], values[0], 0.01) << "Sensor " << sensor << "has unexpected X coordinate";
+	ASSERT_NEAR(actualValues[1], values[1], 0.01) << "Sensor " << sensor << "has unexpected Y coordinate";
+	ASSERT_NEAR(actualValues[2], values[2], 0.01) << "Sensor " << sensor << "has unexpected Z coordinate";
+}

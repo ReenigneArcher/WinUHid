@@ -22,6 +22,7 @@ public:
 	void ExpectHatState(int HatX, int HatY);
 	void ExpectAxisValue(SDL_GamepadAxis Axis, Sint16 Value);
 	void ExpectTouchpadFingerState(int Finger, bool Down, float TouchX, float TouchY);
+	void ExpectSensorData(SDL_SensorType sensor, float* values);
 
 private:
 	static int EventPollThread(void* ptr);
