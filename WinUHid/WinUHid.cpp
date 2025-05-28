@@ -410,6 +410,8 @@ WINUHID_API BOOL WinUHidStartDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLB
 		// we're out to lunch and silently cancel our pending requests for us.
 		//
 		SetThreadPriority(Device->EventThread, THREAD_PRIORITY_TIME_CRITICAL);
+
+		SetThreadDescription(Device->EventThread, L"WinUHid Event Callback Thread");
 	}
 
 	//
@@ -437,6 +439,8 @@ WINUHID_API BOOL WinUHidStartDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLB
 		// we're out to lunch and silently cancel our pending requests for us.
 		//
 		SetThreadPriority(Device->ReadThread, THREAD_PRIORITY_TIME_CRITICAL);
+
+		SetThreadDescription(Device->ReadThread, L"WinUHid Read Report Throttling Thread");
 	}
 
 	if (!DeviceIoControlInSync(Device->Handle, NULL, IOCTL_WINUHID_START_DEVICE, NULL, 0)) {

@@ -478,7 +478,7 @@ VOID WinUHidPS4Callback(PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHID
 	}
 }
 
-DWORD WINAPI LedThreadProc(LPVOID lpParameter)
+DWORD WINAPI PS4LedThreadProc(LPVOID lpParameter)
 {
 	auto device = (PWINUHID_PS4_GAMEPAD)lpParameter;
 
@@ -582,11 +582,13 @@ WINUHID_API PWINUHID_PS4_GAMEPAD WinUHidPS4Create(PCWINUHID_PS4_GAMEPAD_INFO Inf
 			return NULL;
 		}
 
-		gamepad->LedThread = CreateThread(NULL, 0, LedThreadProc, gamepad, 0, NULL);
+		gamepad->LedThread = CreateThread(NULL, 0, PS4LedThreadProc, gamepad, 0, NULL);
 		if (!gamepad->LedThread) {
 			WinUHidPS4Destroy(gamepad);
 			return NULL;
 		}
+
+		SetThreadDescription(gamepad->LedThread, L"WinUHidDev PS4 LED Effects Thread");
 	}
 
 	gamepad->Device = WinUHidCreateDevice(&config);

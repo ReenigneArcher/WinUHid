@@ -203,7 +203,7 @@ VOID WinUHidXOneCallback(PVOID CallbackContext, PWINUHID_DEVICE Device, PCWINUHI
 	WinUHidCompleteWriteEvent(Device, Event, TRUE);
 }
 
-DWORD WINAPI RumbleThreadProc(LPVOID lpParameter)
+DWORD WINAPI XOneRumbleThreadProc(LPVOID lpParameter)
 {
 	auto device = (PWINUHID_XONE_GAMEPAD)lpParameter;
 
@@ -344,11 +344,13 @@ WINUHID_API PWINUHID_XONE_GAMEPAD WinUHidXOneCreate(PCWINUHID_PRESET_DEVICE_INFO
 			return NULL;
 		}
 
-		gamepad->RumbleThread = CreateThread(NULL, 0, RumbleThreadProc, gamepad, 0, NULL);
+		gamepad->RumbleThread = CreateThread(NULL, 0, XOneRumbleThreadProc, gamepad, 0, NULL);
 		if (!gamepad->RumbleThread) {
 			WinUHidXOneDestroy(gamepad);
 			return NULL;
 		}
+
+		SetThreadDescription(gamepad->RumbleThread, L"WinUHidDev XOne Rumble Thread");
 	}
 
 	gamepad->Device = WinUHidCreateDevice(&config);
