@@ -495,6 +495,10 @@ TEST(HIDLL, NumberedOutputReport) {
 		0x09, 0x22,        //   Usage (0x22)
 		0x95, 0x01,        //   Report Count (1)
 		0x91, 0x02,        //   Output (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
+		0x85, 0x03,        //   Report ID (3)
+		0x09, 0x23,        //   Usage (0x23)
+		0x95, 0x02,        //   Report Count (2)
+		0x91, 0x02,        //   Output (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
 		0xC0,              // End Collection
 	};
 
@@ -540,7 +544,7 @@ TEST(HIDLL, NumberedOutputReport) {
 	// Write an output report
 	//
 	UCHAR outputReport[]{ 2, 1 };
-	EXPECT_EQ(SDL_hid_write(hid, outputReport, sizeof(outputReport)), 2);
+	EXPECT_EQ(SDL_hid_write(hid, outputReport, sizeof(outputReport)), 3); // Return is max length of all output reports
 
 	//
 	// Verify that our callback was invoked
@@ -644,6 +648,10 @@ TEST(HIDLL, SetNumberedFeatureReport) {
 		0x09, 0x23,        //   Usage (0x23)
 		0x95, 0x01,        //   Report Count (1)
 		0xB1, 0x02,        //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
+		0x85, 0x04,        //   Report ID (4)
+		0x09, 0x24,        //   Usage (0x24)
+		0x95, 0x02,        //   Report Count (2)
+		0xB1, 0x02,        //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
 		0xC0,              // End Collection
 	};
 
@@ -686,10 +694,10 @@ TEST(HIDLL, SetNumberedFeatureReport) {
 	ASSERT_NE(device, nullptr);
 
 	//
-	// Send a feature report
+	// Send a feature report (with some extra data at the end)
 	//
-	UCHAR featureReport[]{ 3, 1 };
-	EXPECT_EQ(SDL_hid_send_feature_report(hid, featureReport, sizeof(featureReport)), 2);
+	UCHAR featureReport[]{ 3, 1, 0, 0 };
+	EXPECT_EQ(SDL_hid_send_feature_report(hid, featureReport, sizeof(featureReport)), 4);
 
 	//
 	// Verify that our callback was invoked
@@ -786,6 +794,10 @@ TEST(HIDLL, GetNumberedFeatureReport) {
 		0x09, 0x23,        //   Usage (0x23)
 		0x95, 0x01,        //   Report Count (1)
 		0xB1, 0x02,        //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
+		0x85, 0x04,        //   Report ID (4)
+		0x09, 0x24,        //   Usage (0x24)
+		0x95, 0x02,        //   Report Count (2)
+		0xB1, 0x02,        //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
 		0xC0,              // End Collection
 	};
 
@@ -819,13 +831,16 @@ TEST(HIDLL, GetNumberedFeatureReport) {
 	ASSERT_NE(device, nullptr);
 
 	//
-	// Get a feature report
+	// Get a feature report (with some extra space at the end)
 	//
-	UCHAR featureReport[]{ 3, 0 };
-	EXPECT_EQ(SDL_hid_get_feature_report(hid, featureReport, sizeof(featureReport)), 2);
+	UCHAR featureReport[]{ 3, 0, 0xFF, 0xFF, 0xFF };
+	EXPECT_EQ(SDL_hid_get_feature_report(hid, featureReport, sizeof(featureReport)), 5);
 
 	EXPECT_EQ(featureReport[0], 3);
 	EXPECT_EQ(featureReport[1], 5);
+	EXPECT_EQ(featureReport[2], 0);
+	EXPECT_EQ(featureReport[3], 0);
+	EXPECT_EQ(featureReport[4], 0);
 
 	SDL_hid_close(hid);
 	WinUHidDestroyDevice(device);

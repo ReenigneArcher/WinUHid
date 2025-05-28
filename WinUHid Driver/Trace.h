@@ -13,6 +13,7 @@
         WPP_DEFINE_BIT(TRACE_DRIVER)                                   \
         WPP_DEFINE_BIT(TRACE_DEVICE)                                   \
         WPP_DEFINE_BIT(TRACE_EVENT)                                    \
+        WPP_DEFINE_BIT(TRACE_PARSING)                                  \
         )
 
 #define WPP_FLAG_LEVEL_LOGGER(flag, level)                             \

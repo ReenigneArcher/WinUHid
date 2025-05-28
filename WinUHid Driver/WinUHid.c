@@ -1,7 +1,254 @@
 #include "WinUHid.h"
 #include "WinUHid.tmh"
 
+#include <intsafe.h>
+
 #pragma comment(lib, "VhfUm.lib")
+
+VOID
+PostProcessReportSize(
+    _Inout_ PULONG Size,
+    _In_ BOOLEAN NumberedReports
+)
+{
+    ULONG hidReportSizeBytes = *Size / 8;
+    if (*Size % 8) {
+        //
+        // Round up to the next byte boundary
+        //
+        hidReportSizeBytes++;
+    }
+    if (NumberedReports) {
+        //
+        // Add a byte for the report ID prefix
+        //
+        hidReportSizeBytes++;
+    }
+    *Size = hidReportSizeBytes;
+}
+
+//
+// Parses the HID report descriptor to determine report sizes and whether numbered reports are used
+//
+NTSTATUS
+ParseReportDescriptor(
+    _In_ PFILE_CONTEXT FileContext
+)
+{
+    struct {
+        UCHAR ReportId;
+        ULONG ReportCount;
+        ULONG ReportSize;
+    } hidParserFrames[32]; // Arbitrary limit that should be enough for any device
+    UCHAR currentFrame = 0;
+    ULONG i = 0;
+
+    //
+    // Reinitialize parser state and parsed data
+    //
+    FileContext->NumberedReports = FALSE;
+    RtlZeroMemory(FileContext->ReportSizes, sizeof(FileContext->ReportSizes));
+    RtlZeroMemory(hidParserFrames, sizeof(hidParserFrames));
+
+    while (i < FileContext->VhfConfig.ReportDescriptorLength) {
+        UCHAR header = FileContext->VhfConfig.ReportDescriptor[i++];
+        UCHAR tag = (header >> 4) & 0x0F;
+        UCHAR type = (header >> 2) & 0x03;
+        UCHAR size = header & 0x03;
+
+        if (tag == 0xF) {
+            //
+            // Long items
+            //
+            if (i + 2 > FileContext->VhfConfig.ReportDescriptorLength) {
+                TraceEvents(
+                    TRACE_LEVEL_ERROR,
+                    TRACE_PARSING,
+                    "Out of bounds parsing long item header from report descriptor");
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            size = FileContext->VhfConfig.ReportDescriptor[i++];
+            tag = FileContext->VhfConfig.ReportDescriptor[i++];
+        }
+        else {
+            //
+            // Short items
+            //
+            if (size == 3) {
+                //
+                // Size 3 actually means 4 bytes
+                //
+                size++;
+            }
+        }
+
+        //
+        // Check that the report descriptor contains enough bytes for the data value
+        //
+        if (i + size > FileContext->VhfConfig.ReportDescriptorLength) {
+            TraceEvents(
+                TRACE_LEVEL_ERROR,
+                TRACE_PARSING,
+                "Out of bounds reading %u bytes of data from report descriptor",
+                size);
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ULONG data;
+        switch (size) {
+        case 0:
+            data = 0;
+            break;
+        case 1:
+            data = FileContext->VhfConfig.ReportDescriptor[i++];
+            break;
+        case 2:
+            data = FileContext->VhfConfig.ReportDescriptor[i++];
+            data |= ((ULONG)FileContext->VhfConfig.ReportDescriptor[i++]) << 8;
+            break;
+        case 4:
+            data = FileContext->VhfConfig.ReportDescriptor[i++];
+            data |= ((ULONG)FileContext->VhfConfig.ReportDescriptor[i++]) << 8;
+            data |= ((ULONG)FileContext->VhfConfig.ReportDescriptor[i++]) << 16;
+            data |= ((ULONG)FileContext->VhfConfig.ReportDescriptor[i++]) << 24;
+            break;
+        default:
+            //
+            // Long items are not relevant for any tags we care about
+            //
+            i += size;
+            continue;
+        }
+
+        if (type == 0x01) { // Global item
+            switch (tag) {
+            case 0x7: // Report size
+                hidParserFrames[currentFrame].ReportSize = data;
+                break;
+            case 0x8: // Report ID
+                if (ULongToUChar(data, &hidParserFrames[currentFrame].ReportId) != S_OK) {
+                    TraceEvents(
+                        TRACE_LEVEL_ERROR,
+                        TRACE_PARSING,
+                        "Invalid data size for report ID item: %u",
+                        size);
+                    return STATUS_INVALID_PARAMETER;
+                }
+                FileContext->NumberedReports = TRUE;
+                break;
+            case 0x9: // Report count
+                hidParserFrames[currentFrame].ReportCount = data;
+                break;
+            case 0xA: // Push state frame
+                if (currentFrame + 1 < ARRAYSIZE(hidParserFrames)) {
+                    TraceEvents(
+                        TRACE_LEVEL_ERROR,
+                        TRACE_PARSING,
+                        "Attempting to push more state frames than supported");
+                    return STATUS_NOT_IMPLEMENTED;
+                }
+
+                hidParserFrames[currentFrame + 1] = hidParserFrames[currentFrame];
+                currentFrame++;
+                break;
+            case 0xB: // Pop state frame
+                if (currentFrame == 0) {
+                    TraceEvents(
+                        TRACE_LEVEL_ERROR,
+                        TRACE_PARSING,
+                        "Underflow detected when popping state frame");
+                    return STATUS_INVALID_PARAMETER;
+                }
+
+                currentFrame--;
+                break;
+            default:
+                break;
+            }
+        }
+        else if (type == 0x00) { // Main item
+            ULONG reportDataBits;
+            PHID_REPORT_SIZE hidReportSizeEntry = &FileContext->ReportSizes[hidParserFrames[currentFrame].ReportId];
+
+            if (ULongMult(hidParserFrames[currentFrame].ReportSize,
+                          hidParserFrames[currentFrame].ReportCount,
+                          &reportDataBits) != S_OK) {
+                TraceEvents(
+                    TRACE_LEVEL_ERROR,
+                    TRACE_PARSING,
+                    "Integer overflow calculating report data bits");
+                return STATUS_INTEGER_OVERFLOW;
+            }
+
+            switch (tag) {
+            case 0x8: // Input
+                if (ULongAdd(hidReportSizeEntry->InputReportSize, reportDataBits, &hidReportSizeEntry->InputReportSize) != S_OK) {
+                    TraceEvents(
+                        TRACE_LEVEL_ERROR,
+                        TRACE_PARSING,
+                        "Integer overflow calculating input report size");
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+                break;
+            case 0x9: // Output
+                if (ULongAdd(hidReportSizeEntry->OutputReportSize, reportDataBits, &hidReportSizeEntry->OutputReportSize) != S_OK) {
+                    TraceEvents(
+                        TRACE_LEVEL_ERROR,
+                        TRACE_PARSING,
+                        "Integer overflow calculating output report size");
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+                break;
+            case 0xB: // Feature
+                if (ULongAdd(hidReportSizeEntry->FeatureReportSize, reportDataBits, &hidReportSizeEntry->FeatureReportSize) != S_OK) {
+                    TraceEvents(
+                        TRACE_LEVEL_ERROR,
+                        TRACE_PARSING,
+                        "Integer overflow calculating feature report size");
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+                break;
+            }
+        }
+    }
+
+    //
+    // Perform post processing to convert bits to bytes and add required padding
+    //
+    for (i = 0; i < ARRAYSIZE(FileContext->ReportSizes); i++) {
+        PHID_REPORT_SIZE hidReportSizeEntry = &FileContext->ReportSizes[i];
+        if (hidReportSizeEntry->InputReportSize) {
+            PostProcessReportSize(&hidReportSizeEntry->InputReportSize, FileContext->NumberedReports);
+
+            TraceEvents(
+                TRACE_LEVEL_INFORMATION,
+                TRACE_PARSING,
+                "Input report %u is %u bytes",
+                i, hidReportSizeEntry->InputReportSize);
+        }
+        if (hidReportSizeEntry->OutputReportSize) {
+            PostProcessReportSize(&hidReportSizeEntry->OutputReportSize, FileContext->NumberedReports);
+
+            TraceEvents(
+                TRACE_LEVEL_INFORMATION,
+                TRACE_PARSING,
+                "Output report %u is %u bytes",
+                i, hidReportSizeEntry->OutputReportSize);
+        }
+        if (hidReportSizeEntry->FeatureReportSize) {
+            PostProcessReportSize(&hidReportSizeEntry->FeatureReportSize, FileContext->NumberedReports);
+
+            TraceEvents(
+                TRACE_LEVEL_INFORMATION,
+                TRACE_PARSING,
+                "Feature report %u is %u bytes",
+                i, hidReportSizeEntry->FeatureReportSize);
+        }
+    }
+
+    return STATUS_SUCCESS;
+}
 
 //
 // Upon success, the caller must complete and free the returned request.
@@ -218,6 +465,52 @@ DispatchAsyncOperation(
         opContext->RequestId = InterlockedIncrement(&fileContext->NextRequestId) | 0x80000000;
         opContext->Handle = VhfOperationHandle;
         opContext->HidTransferPacket = *HidTransferPacket;
+
+        //
+        // Windows 10's version of VHF has a bug where it can return a report buffer length
+        // that is larger than the actual buffer it allocated. Fortunately it does actually
+        // allocate a buffer of the maximum report size, so we can just clamp the length
+        // value here as a workaround.
+        //
+        PHID_REPORT_SIZE reportSizeEntry = &fileContext->ReportSizes[opContext->HidTransferPacket.reportId];
+        ULONG reportSize = 0;
+        switch (EventType) {
+        case WINUHID_EVENT_SET_FEATURE:
+        case WINUHID_EVENT_GET_FEATURE:
+            reportSize = reportSizeEntry->FeatureReportSize;
+            break;
+        case WINUHID_EVENT_WRITE_REPORT:
+            reportSize = reportSizeEntry->OutputReportSize;
+            break;
+        case WINUHID_EVENT_READ_REPORT:
+            reportSize = reportSizeEntry->InputReportSize;
+            break;
+        }
+
+        //
+        // We should know how long all reports should be. If not, something is seriously wrong.
+        //
+        if (reportSize == 0) {
+            WDFVERIFY(reportSize != 0);
+            TraceEvents(
+                TRACE_LEVEL_ERROR,
+                TRACE_EVENT,
+                "Request has unknown report ID: %u",
+                opContext->HidTransferPacket.reportId);
+            if (VhfOperationHandle) {
+                status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_UNSUCCESSFUL);
+                WDFVERIFY(NT_SUCCESS(status));
+            }
+            WdfObjectDelete(asyncOp);
+            return;
+        }
+
+        //
+        // Clamp the length to the size of this report
+        //
+        if (reportSize < opContext->HidTransferPacket.reportBufferLen) {
+            opContext->HidTransferPacket.reportBufferLen = reportSize;
+        }
     }
 
     //
@@ -504,6 +797,20 @@ WinUHidEvtIoDeviceControl(
 
         fileContext->VhfConfig.ReportDescriptor = WdfMemoryGetBuffer(fileContext->ReportDescriptorMem, NULL);
         fileContext->VhfConfig.ReportDescriptorLength = (USHORT)InputBufferLength; // Truncation checked above
+
+        //
+        // Parse the report descriptor to determine the size of each report and whether numbered reports are used
+        //
+        status = ParseReportDescriptor(fileContext);
+        if (!NT_SUCCESS(status)) {
+            fileContext->VhfConfig.ReportDescriptor = NULL;
+            fileContext->VhfConfig.ReportDescriptorLength = 0;
+            WdfObjectDelete(fileContext->ReportDescriptorMem);
+            fileContext->ReportDescriptorMem = NULL;
+            WdfRequestComplete(Request, status);
+            break;
+        }
+
         WdfRequestComplete(Request, status);
         break;
     }
@@ -793,7 +1100,7 @@ WinUHidEvtIoDeviceControl(
                 // The user provided data for us to complete the request now
                 //
                 HID_XFER_PACKET xferPkt;
-                xferPkt.reportId = readComplete->Data[0];
+                xferPkt.reportId = fileContext->NumberedReports ? readComplete->Data[0] : 0;
                 xferPkt.reportBuffer = readComplete->Data;
                 xferPkt.reportBufferLen = readComplete->DataLength;
                 status = VhfReadReportSubmit(fileContext->VhfHandle, &xferPkt);
@@ -1001,7 +1308,7 @@ void WinUHidEvtIoWrite(
     }
 
     //
-    // Get the input buffer which must be at least 1 byte (report ID)
+    // Get the input buffer which must be at least 1 byte
     //
     status = WdfRequestRetrieveInputBuffer(Request, 1, &inputBuffer, NULL);
     if (!NT_SUCCESS(status)) {
@@ -1019,7 +1326,7 @@ void WinUHidEvtIoWrite(
     //
     // Submit the report to VHF
     //
-    xferPkt.reportId = inputBuffer[0];
+    xferPkt.reportId = fileContext->NumberedReports ? inputBuffer[0] : 0;
     xferPkt.reportBufferLen = (ULONG)Length;
     xferPkt.reportBuffer = inputBuffer;
     status = VhfReadReportSubmit(fileContext->VhfHandle, &xferPkt);

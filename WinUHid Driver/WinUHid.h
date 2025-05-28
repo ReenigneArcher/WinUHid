@@ -23,6 +23,13 @@ typedef struct _DEVICE_CONTEXT
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, DeviceGetContext)
 
+typedef struct _HID_REPORT_SIZE
+{
+    ULONG InputReportSize;
+    ULONG OutputReportSize;
+    ULONG FeatureReportSize;
+} HID_REPORT_SIZE, *PHID_REPORT_SIZE;
+
 typedef struct _FILE_CONTEXT
 {
     PDEVICE_CONTEXT DeviceContext;
@@ -41,6 +48,12 @@ typedef struct _FILE_CONTEXT
     WDFMEMORY InstanceIdMem;
     WDFMEMORY ReportDescriptorMem;
     WDFMEMORY HardwareIdsMem;
+
+    //
+    // HID report sizes
+    //
+    HID_REPORT_SIZE ReportSizes[256];
+    BOOLEAN NumberedReports;
 
     //
     // Counter used for assigning request handles
