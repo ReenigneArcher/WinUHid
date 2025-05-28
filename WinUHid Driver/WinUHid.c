@@ -141,7 +141,7 @@ ParseReportDescriptor(
                 hidParserFrames[currentFrame].ReportCount = data;
                 break;
             case 0xA: // Push state frame
-                if (currentFrame + 1 < ARRAYSIZE(hidParserFrames)) {
+                if (currentFrame + 1 >= ARRAYSIZE(hidParserFrames)) {
                     TraceEvents(
                         TRACE_LEVEL_ERROR,
                         TRACE_PARSING,
