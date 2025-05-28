@@ -467,5 +467,10 @@ TEST(PS5, RumbleEffects) {
 		EXPECT_CB_VALUE(rumbleState, MAKE_RUMBLE_VALUE(0, i));
 	}
 
+	//
+	// Rumble will cease after 100ms
+	//
+	EXPECT_CB_VALUE(rumbleState, MAKE_RUMBLE_VALUE(0, 0));
+
 	WinUHidPS5Destroy(gamepad);
 }
