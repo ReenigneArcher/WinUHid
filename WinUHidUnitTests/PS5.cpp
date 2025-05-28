@@ -38,13 +38,7 @@ TEST(PS5, CreateAdvanced) {
 	EXPECT_EQ(SDL_GetGamepadVendor(gm.GetGamepad(0)), 0x054c); // Sony
 	EXPECT_EQ(SDL_GetGamepadProduct(gm.GetGamepad(0)), 0x0df2); // DualSense Edge
 	EXPECT_EQ(SDL_GetGamepadProductVersion(gm.GetGamepad(0)), 1);
-
-#if 0
-	//
-	// FIXME: Currently broken due to SDL's attempt to perform an input report read to detect enhanced mode
-	//
 	EXPECT_EQ(std::string{ SDL_GetGamepadSerial(gm.GetGamepad(0)) }, "01-02-03-04-05-06");
-#endif
 
 	WinUHidPS5Destroy(gamepad);
 }
