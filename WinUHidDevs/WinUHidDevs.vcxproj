@@ -86,6 +86,7 @@
     <ClInclude Include="WinUHidDevs.h" />
     <ClInclude Include="WinUHidMouse.h" />
     <ClInclude Include="WinUHidPS4.h" />
+    <ClInclude Include="WinUHidPS5.h" />
     <ClInclude Include="WinUHidXOne.h" />
   </ItemGroup>
   <ItemGroup>
@@ -95,6 +96,7 @@
     <ClCompile Include="WinUHidDevs.cpp" />
     <ClCompile Include="WinUHidMouse.cpp" />
     <ClCompile Include="WinUHidPS4.cpp" />
+    <ClCompile Include="WinUHidPS5.cpp" />
     <ClCompile Include="WinUHidXOne.cpp" />
   </ItemGroup>
   <ItemGroup>

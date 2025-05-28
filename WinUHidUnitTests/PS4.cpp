@@ -250,8 +250,8 @@ TEST(PS4, SensorMapping) {
 }
 
 //
-// The touchpad is 943 points wide, but SDL treats it as 920. Since we want to
-// validate against SDL's representation, we must also use 920 as the width.
+// The touchpad is 943 points tall, but SDL treats it as 920. Since we want to
+// validate against SDL's representation, we must also use 920 as the height.
 //
 
 #define TOUCHPAD_WIDTH 1920

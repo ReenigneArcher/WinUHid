@@ -12,6 +12,7 @@
 #include "../WinUHidDevs/WinUHidMouse.h"
 #include "../WinUHidDevs/WinUHidXOne.h"
 #include "../WinUHidDevs/WinUHidPS4.h"
+#include "../WinUHidDevs/WinUHidPS5.h"
 #include "../WinUHid/WinUHid.h"
 
 #include <SDL3/SDL_hidapi.h>
