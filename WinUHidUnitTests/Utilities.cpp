@@ -161,9 +161,9 @@ void SDLGamepadManager::ExpectSensorData(SDL_SensorType sensor, float* values) {
 
 	float actualValues[3];
 	EXPECT_TRUE(SDL_GetGamepadSensorData(GetGamepad(0), sensor, actualValues, ARRAYSIZE(actualValues)));
-	ASSERT_NEAR(actualValues[0], values[0], 0.01) << "Sensor " << sensor << "has unexpected X coordinate";
-	ASSERT_NEAR(actualValues[1], values[1], 0.01) << "Sensor " << sensor << "has unexpected Y coordinate";
-	ASSERT_NEAR(actualValues[2], values[2], 0.01) << "Sensor " << sensor << "has unexpected Z coordinate";
+	ASSERT_NEAR(actualValues[0], values[0], 0.01) << "Sensor " << sensor << " has unexpected X coordinate";
+	ASSERT_NEAR(actualValues[1], values[1], 0.01) << "Sensor " << sensor << " has unexpected Y coordinate";
+	ASSERT_NEAR(actualValues[2], values[2], 0.01) << "Sensor " << sensor << " has unexpected Z coordinate";
 }
 
 SDL_hid_device* SDLHIDManager::OpenDevice(USHORT VendorId, USHORT ProductId) {
